@@ -4,32 +4,33 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OfficeDesk — Task & Problem Management</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'><rect width='36' height='36' rx='8' fill='%232D5BFF'/><text x='18' y='24' text-anchor='middle' fill='white' font-size='20' font-weight='bold'>O</text></svg>" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; background: #F3F4F8; color: #1A1D23; }
-    select, input, textarea, button { font-family: inherit; }
-    ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
-    @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
-
-    /* Responsive */
-    @media (max-width: 768px) {
-      .app-layout { flex-direction: column !important; }
-      .sidebar { width: 100% !important; border-right: none !important; border-bottom: 1px solid #E5E7EB; padding: 10px 0 !important; }
-      .sidebar .nav-section { display: flex; overflow-x: auto; gap: 0 !important; padding: 0 8px !important; }
-      .sidebar .nav-btn { white-space: nowrap; border-right: none !important; border-bottom: 3px solid transparent !important; padding: 8px 14px !important; font-size: 12px !important; }
-      .sidebar .nav-btn.active { border-bottom-color: #2D5BFF !important; border-right-color: transparent !important; }
-      .sidebar .user-info { display: none; }
-      .main-content { padding: 16px !important; }
-      .stat-row { flex-direction: column !important; }
-      .form-row { flex-direction: column !important; }
-      .header-inner { padding: 0 14px !important; }
-      .header-select { max-width: 160px; font-size: 12px !important; }
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;background:#F3F4F8;color:#1A1D23}
+    select,input,textarea,button{font-family:inherit}
+    ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:3px}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes slideIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
+    @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
+    .loading-dot{animation:pulse 1.4s ease-in-out infinite}
+    .loading-dot:nth-child(2){animation-delay:.2s}.loading-dot:nth-child(3){animation-delay:.4s}
+    @media(max-width:768px){
+      .app-layout{flex-direction:column!important}
+      .sidebar{width:100%!important;border-right:none!important;border-bottom:1px solid #E5E7EB;padding:10px 0!important}
+      .sidebar .nav-section{display:flex;overflow-x:auto;gap:0!important;padding:0 8px!important}
+      .sidebar .nav-btn{white-space:nowrap;border-right:none!important;border-bottom:3px solid transparent!important;padding:8px 14px!important;font-size:12px!important}
+      .sidebar .nav-btn.active{border-bottom-color:#2D5BFF!important;border-right-color:transparent!important}
+      .sidebar .user-info{display:none}
+      .main-content{padding:16px!important}
+      .stat-row{flex-direction:column!important}
+      .form-row{flex-direction:column!important}
+      .header-inner{padding:0 14px!important}
     }
   </style>
 </head>
@@ -37,57 +38,41 @@
 <div id="root"></div>
 
 <script type="text/babel">
-const { useState, useEffect } = React;
+const { useState, useEffect, useCallback, useRef } = React;
 
-/* ═══════════════ DATA ═══════════════ */
-const EMPLOYEES = [
-  { id: "ea1", name: "Neha Nidhi Xaxa", role: "EA", dept: "Administration", avatar: "NN" },
-  { id: "e1", name: "Mukesh Shukla", role: "Employee", dept: "Manager", avatar: "MS" },
-  { id: "e2", name: "Indresh Pratap", role: "Employee", dept: "Dispatch", avatar: "IP" },
-  { id: "e3", name: "Pooja", role: "Employee", dept: "CRM", avatar: "P" },
-  { id: "e4", name: "Sandeep Dhawan", role: "Employee", dept: "Account", avatar: "SD" },
-  { id: "e5", name: "Sonu Chauhan", role: "Employee", dept: "Sales", avatar: "SC" },
-  { id: "e6", name: "Pawan Negi", role: "Employee", dept: "Sales", avatar: "PN" },
-  { id: "e7", name: "Rishabh Jain", role: "Employee", dept: "Sales", avatar: "RJ" },
-  { id: "e8", name: "Khushi Painter", role: "Employee", dept: "MIS", avatar: "KP" },
-  { id: "e9", name: "Richa", role: "Employee", dept: "PC", avatar: "R" },
-];
+// ╔══════════════════════════════════════════════════════════════╗
+// ║  CONFIGURATION — Replace these two values after setup       ║
+// ╚══════════════════════════════════════════════════════════════╝
+const CONFIG = {
+  GOOGLE_CLIENT_ID: 'PASTE_YOUR_GOOGLE_CLIENT_ID_HERE',
+  APPS_SCRIPT_URL: 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE'
+};
 
+// ──────────── API HELPER ────────────
+async function api(action, data = {}) {
+  const resp = await fetch(CONFIG.APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action, ...data }),
+    redirect: 'follow'
+  });
+  return resp.json();
+}
+
+// ──────────── CONSTANTS ────────────
 const CATEGORIES = ["IT Issue", "Facility", "HR Query", "Admin Request", "Equipment", "Other"];
 const PRIORITIES = ["Low", "Medium", "High", "Urgent"];
 
-/* ═══════════════ LOCALSTORAGE HELPERS ═══════════════ */
-function loadData(key, fallback) {
-  try {
-    const stored = localStorage.getItem("officedesk_" + key);
-    return stored ? JSON.parse(stored) : fallback;
-  } catch { return fallback; }
-}
-function saveData(key, data) {
-  try { localStorage.setItem("officedesk_" + key, JSON.stringify(data)); } catch {}
-}
-
-const defaultProblems = [
-  { id: "P-001", title: "Printer not working on 3rd floor", category: "IT Issue", priority: "High", description: "The main printer near the conference room is jammed and showing error E-302.", reportedBy: "e1", date: "2026-08-12", status: "Open" },
-  { id: "P-002", title: "AC not cooling in marketing bay", category: "Facility", priority: "Medium", description: "Temperature in the marketing area stays at 30°C despite AC running all day.", reportedBy: "e2", date: "2026-08-13", status: "Assigned" },
-  { id: "P-003", title: "Need new ergonomic chair", category: "Equipment", priority: "Low", description: "My current chair's backrest is broken. Requesting a replacement.", reportedBy: "e3", date: "2026-08-13", status: "Open" },
-];
-
-const defaultTasks = [
-  { id: "T-001", title: "Fix AC in marketing bay", description: "Coordinate with HVAC vendor to inspect and repair the AC unit in marketing area.", assignedTo: "e5", assignedBy: "ea1", linkedProblem: "P-002", priority: "Medium", status: "In Progress", dueDate: "2026-08-15", createdDate: "2026-08-13" },
-];
-
-/* ═══════════════ SMALL COMPONENTS ═══════════════ */
 const priorityColor = (p) => ({ Low: "#6B7280", Medium: "#2563EB", High: "#F59E0B", Urgent: "#EF4444" }[p] || "#6B7280");
 const statusColor = (s) => ({ Open: "#8B5CF6", Assigned: "#2563EB", "In Progress": "#F59E0B", Resolved: "#10B981", Closed: "#6B7280", Pending: "#8B5CF6", Completed: "#10B981" }[s] || "#6B7280");
-const getName = (id) => EMPLOYEES.find(e => e.id === id)?.name || "Unknown";
-const getAvatar = (id) => EMPLOYEES.find(e => e.id === id)?.avatar || "??";
 
+// ──────────── SMALL COMPONENTS ────────────
 function Badge({ text, color }) {
   return <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 999, fontSize: 11, fontWeight: 600, letterSpacing: 0.3, background: color + "18", color, border: `1px solid ${color}40`, textTransform: "uppercase" }}>{text}</span>;
 }
 
-function Avatar({ initials, size = 36, color = "#2D5BFF" }) {
+function Avatar({ initials, size = 36, color = "#2D5BFF", picture }) {
+  if (picture) return <img src={picture} alt="" style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} referrerPolicy="no-referrer" />;
   return <div style={{ width: size, height: size, borderRadius: "50%", background: color + "16", color, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: size * 0.36, letterSpacing: 0.5, flexShrink: 0 }}>{initials}</div>;
 }
 
@@ -113,110 +98,267 @@ function EmptyState({ icon, title, subtitle }) {
   );
 }
 
-/* ═══════════════ MAIN APP ═══════════════ */
-function App() {
-  const [currentUser, setCurrentUser] = useState(loadData("currentUser", "ea1"));
-  const [view, setView] = useState("dashboard");
-  const [problems, setProblems] = useState(() => loadData("problems", defaultProblems));
-  const [tasks, setTasks] = useState(() => loadData("tasks", defaultTasks));
-  const [notification, setNotification] = useState(null);
+function LoadingSpinner({ text = "Loading..." }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 300, gap: 16 }}>
+      <div style={{ display: "flex", gap: 6 }}>
+        <div className="loading-dot" style={{ width: 10, height: 10, borderRadius: "50%", background: "#2D5BFF" }} />
+        <div className="loading-dot" style={{ width: 10, height: 10, borderRadius: "50%", background: "#2D5BFF" }} />
+        <div className="loading-dot" style={{ width: 10, height: 10, borderRadius: "50%", background: "#2D5BFF" }} />
+      </div>
+      <div style={{ fontSize: 14, color: "#6B7280", fontWeight: 500 }}>{text}</div>
+    </div>
+  );
+}
 
-  const [problemForm, setProblemForm] = useState({ title: "", category: "IT Issue", priority: "Medium", description: "" });
-  const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "e1", priority: "Medium", dueDate: "", linkedProblem: "" });
+// ══════════════════════════════════════════════════
+// ║  LOGIN SCREEN
+// ══════════════════════════════════════════════════
+function LoginScreen({ onLogin }) {
+  const [error, setError] = useState(null);
+  const [checking, setChecking] = useState(false);
+  const btnRef = useRef(null);
 
-  // Persist to localStorage
-  useEffect(() => { saveData("problems", problems); }, [problems]);
-  useEffect(() => { saveData("tasks", tasks); }, [tasks]);
-  useEffect(() => { saveData("currentUser", currentUser); }, [currentUser]);
-
-  const isEA = EMPLOYEES.find(e => e.id === currentUser)?.role === "EA";
-  const user = EMPLOYEES.find(e => e.id === currentUser);
-  const notify = (msg) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
-
-  const nextId = (prefix, list) => `${prefix}-${String(list.length + 1).padStart(3, "0")}`;
-
-  const submitProblem = () => {
-    if (!problemForm.title.trim()) { notify("Please enter a title"); return; }
-    const p = { id: nextId("P", problems), ...problemForm, reportedBy: currentUser, date: new Date().toISOString().split("T")[0], status: "Open" };
-    setProblems(prev => [p, ...prev]);
-    setProblemForm({ title: "", category: "IT Issue", priority: "Medium", description: "" });
-    notify("Problem registered successfully!");
-  };
-
-  const submitTask = () => {
-    if (!taskForm.title.trim()) { notify("Please enter a task title"); return; }
-    const t = { id: nextId("T", tasks), ...taskForm, assignedBy: currentUser, status: "Pending", createdDate: new Date().toISOString().split("T")[0] };
-    setTasks(prev => [t, ...prev]);
-    if (taskForm.linkedProblem) {
-      setProblems(prev => prev.map(p => p.id === taskForm.linkedProblem ? { ...p, status: "Assigned" } : p));
-    }
-    setTaskForm({ title: "", description: "", assignedTo: "e1", priority: "Medium", dueDate: "", linkedProblem: "" });
-    notify("Task assigned to " + getName(taskForm.assignedTo) + "!");
-  };
-
-  const updateTaskStatus = (taskId, status) => {
-    setTasks(prev => prev.map(t => {
-      if (t.id !== taskId) return t;
-      const updated = { ...t, status };
-      if (status === "Completed" && updated.linkedProblem) {
-        setProblems(pp => pp.map(p => p.id === updated.linkedProblem ? { ...p, status: "Resolved" } : p));
+  useEffect(() => {
+    const initGSI = () => {
+      if (!window.google?.accounts) {
+        setTimeout(initGSI, 200);
+        return;
       }
-      return updated;
-    }));
-    notify("Task updated to " + status);
+      google.accounts.id.initialize({
+        client_id: CONFIG.GOOGLE_CLIENT_ID,
+        callback: handleCredential,
+        auto_select: false,
+      });
+      google.accounts.id.renderButton(btnRef.current, {
+        theme: 'outline', size: 'large', width: 320, text: 'signin_with', shape: 'rectangular'
+      });
+    };
+    initGSI();
+  }, []);
+
+  const handleCredential = async (response) => {
+    setChecking(true); setError(null);
+    try {
+      const payload = JSON.parse(atob(response.credential.split('.')[1]));
+      const result = await api('login', { email: payload.email });
+
+      if (result.success) {
+        const session = {
+          employee: result.employee,
+          email: payload.email,
+          picture: payload.picture,
+          credential: response.credential,
+          loginTime: Date.now()
+        };
+        sessionStorage.setItem('officedesk_session', JSON.stringify(session));
+        onLogin(session);
+      } else {
+        setError(result.error || 'Login failed. Your email is not authorized.');
+      }
+    } catch (err) {
+      setError('Connection error. Please check your internet and try again.');
+    }
+    setChecking(false);
   };
 
-  const resetData = () => {
-    setProblems(defaultProblems);
-    setTasks(defaultTasks);
-    notify("Sample data restored!");
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, #F3F4F8 0%, #E8ECFF 100%)" }}>
+      <div style={{ background: "#fff", borderRadius: 20, padding: "48px 44px", maxWidth: 420, width: "90%", boxShadow: "0 8px 40px #2D5BFF12", textAlign: "center", border: "1px solid #E5E7EB" }}>
+
+        <img src="logo.png" alt="Office Logo" style={{ height: 72, marginBottom: 20, objectFit: "contain" }}
+          onError={(e) => { e.target.style.display = 'none'; }} />
+
+        <h1 style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: "#1A1D23" }}>OfficeDesk</h1>
+        <p style={{ fontSize: 14, color: "#6B7280", marginBottom: 32, lineHeight: 1.5 }}>
+          Task & Problem Management System<br />
+          <span style={{ fontSize: 12 }}>Sign in with your authorized Gmail to continue</span>
+        </p>
+
+        {checking ? (
+          <LoadingSpinner text="Verifying your access..." />
+        ) : (
+          <div style={{ display: "flex", justifyContent: "center" }}>
+            <div ref={btnRef}></div>
+          </div>
+        )}
+
+        {error && (
+          <div style={{ marginTop: 20, padding: "12px 16px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, color: "#DC2626", fontSize: 13, fontWeight: 500, animation: "fadeIn 0.3s" }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ marginTop: 32, fontSize: 11, color: "#9CA3AF" }}>
+          Only authorized employees can access this system
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════
+// ║  MAIN APP (after login)
+// ══════════════════════════════════════════════════
+function Dashboard({ session, onLogout }) {
+  const [view, setView] = useState("dashboard");
+  const [problems, setProblems] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [notification, setNotification] = useState(null);
+  const [problemForm, setProblemForm] = useState({ title: "", category: "IT Issue", priority: "Medium", description: "" });
+  const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "", priority: "Medium", dueDate: "", linkedProblem: "" });
+
+  const user = session.employee;
+  const isEA = user.role === 'EA';
+
+  const notify = (msg, isError = false) => {
+    setNotification({ msg, isError });
+    setTimeout(() => setNotification(null), 3500);
   };
 
-  const myTasks = tasks.filter(t => t.assignedTo === currentUser);
-  const myProblems = problems.filter(p => p.reportedBy === currentUser);
+  // ── Load data ──
+  const refreshData = useCallback(async () => {
+    try {
+      const result = await api('getAllData', { email: session.email });
+      if (result.success) {
+        setProblems(result.problems || []);
+        setTasks(result.tasks || []);
+        setEmployees(result.employees || []);
+      } else {
+        notify(result.error || 'Failed to load data', true);
+      }
+    } catch (err) {
+      notify('Connection error', true);
+    }
+    setLoading(false);
+  }, [session.email]);
+
+  useEffect(() => { refreshData(); }, [refreshData]);
+
+  // ── Submit Problem ──
+  const submitProblem = async () => {
+    if (!problemForm.title.trim()) { notify("Please enter a title", true); return; }
+    setSaving(true);
+    try {
+      const result = await api('addProblem', { email: session.email, ...problemForm });
+      if (result.success) {
+        notify("Problem registered successfully!");
+        setProblemForm({ title: "", category: "IT Issue", priority: "Medium", description: "" });
+        await refreshData();
+        setView("myproblems");
+      } else { notify(result.error, true); }
+    } catch { notify("Failed to submit", true); }
+    setSaving(false);
+  };
+
+  // ── Submit Task ──
+  const submitTask = async () => {
+    if (!taskForm.title.trim()) { notify("Please enter a task title", true); return; }
+    if (!taskForm.assignedTo) { notify("Please select an employee", true); return; }
+    setSaving(true);
+    try {
+      const result = await api('addTask', { email: session.email, ...taskForm });
+      if (result.success) {
+        notify("Task assigned to " + (result.task?.assigneeName || "employee") + "!");
+        setTaskForm({ title: "", description: "", assignedTo: "", priority: "Medium", dueDate: "", linkedProblem: "" });
+        await refreshData();
+        setView("tasks");
+      } else { notify(result.error, true); }
+    } catch { notify("Failed to assign", true); }
+    setSaving(false);
+  };
+
+  // ── Update Task Status ──
+  const updateTaskStatus = async (taskId, newStatus) => {
+    setSaving(true);
+    try {
+      const result = await api('updateTaskStatus', { email: session.email, taskId, newStatus });
+      if (result.success) {
+        notify("Task updated to " + newStatus);
+        await refreshData();
+      } else { notify(result.error, true); }
+    } catch { notify("Failed to update", true); }
+    setSaving(false);
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('officedesk_session');
+    if (window.google?.accounts) google.accounts.id.disableAutoSelect();
+    onLogout();
+  };
+
   const openProblems = problems.filter(p => p.status === "Open");
+  const myTasks = isEA ? tasks : tasks;
+  const myProblems = problems;
 
   const navItems = isEA
-    ? [{ key: "dashboard", label: "Dashboard", icon: "📊" }, { key: "problems", label: "Problems", icon: "📋" }, { key: "tasks", label: "All Tasks", icon: "📌" }, { key: "assign", label: "Assign Task", icon: "➕" }]
-    : [{ key: "dashboard", label: "Dashboard", icon: "📊" }, { key: "report", label: "Report Problem", icon: "🚨" }, { key: "mytasks", label: "My Tasks", icon: "✅" }, { key: "myproblems", label: "My Problems", icon: "📝" }];
+    ? [{ key: "dashboard", label: "Dashboard", icon: "\u{1F4CA}" }, { key: "problems", label: "Problems", icon: "\u{1F4CB}" }, { key: "tasks", label: "All Tasks", icon: "\u{1F4CC}" }, { key: "assign", label: "Assign Task", icon: "\u{2795}" }]
+    : [{ key: "dashboard", label: "Dashboard", icon: "\u{1F4CA}" }, { key: "report", label: "Report Problem", icon: "\u{1F6A8}" }, { key: "mytasks", label: "My Tasks", icon: "\u{2705}" }, { key: "myproblems", label: "My Problems", icon: "\u{1F4DD}" }];
 
   const inp = { width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #D1D5DB", fontSize: 14, outline: "none", fontFamily: "inherit", boxSizing: "border-box", background: "#FAFBFC" };
   const lbl = { display: "block", marginBottom: 4, fontSize: 12, fontWeight: 600, color: "#374151", letterSpacing: 0.3 };
   const btnP = { padding: "10px 24px", borderRadius: 8, border: "none", background: "#2D5BFF", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" };
   const btnS = { ...btnP, background: "#F3F4F6", color: "#374151" };
 
+  if (loading) return <LoadingSpinner text="Loading your workspace..." />;
+
+  const getName = (email) => {
+    const emp = employees.find(e => e.email === email);
+    return emp ? emp.name : (email || "Unknown");
+  };
+
   return (
     <div style={{ minHeight: "100vh" }}>
 
-      {/* ── NOTIFICATION ── */}
+      {/* Notification */}
       {notification && (
-        <div style={{ position: "fixed", top: 16, right: 16, background: "#10B981", color: "#fff", padding: "12px 24px", borderRadius: 10, fontWeight: 600, fontSize: 14, zIndex: 999, boxShadow: "0 4px 20px #10B98140", animation: "fadeIn 0.3s" }}>
-          ✓ {notification}
+        <div style={{ position: "fixed", top: 16, right: 16, background: notification.isError ? "#EF4444" : "#10B981", color: "#fff", padding: "12px 24px", borderRadius: 10, fontWeight: 600, fontSize: 14, zIndex: 999, boxShadow: `0 4px 20px ${notification.isError ? "#EF444440" : "#10B98140"}`, animation: "fadeIn 0.3s", maxWidth: 360 }}>
+          {notification.isError ? "\u2718" : "\u2713"} {notification.msg}
         </div>
       )}
 
-      {/* ── HEADER ── */}
-      <header style={{ background: "#fff", borderBottom: "1px solid #E5E7EB", height: 64, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 28px" }} className="header-inner">
+      {/* Saving overlay */}
+      {saving && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "#00000020", zIndex: 998, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: "20px 32px", boxShadow: "0 4px 20px #0002" }}>
+            <LoadingSpinner text="Saving..." />
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <header className="header-inner" style={{ background: "#fff", borderBottom: "1px solid #E5E7EB", height: 64, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 28px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 8, background: "linear-gradient(135deg, #2D5BFF, #7C3AED)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 16 }}>O</div>
+          <img src="logo.png" alt="" style={{ height: 38, objectFit: "contain" }}
+            onError={(e) => {
+              e.target.style.display = 'none';
+              e.target.nextSibling.style.display = 'flex';
+            }} />
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: "linear-gradient(135deg, #2D5BFF, #7C3AED)", display: "none", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 16 }}>O</div>
           <div>
             <div style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.2 }}>OfficeDesk</div>
             <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500 }}>Task & Problem Management</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <select className="header-select" value={currentUser} onChange={e => { setCurrentUser(e.target.value); setView("dashboard"); }}
-            style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #D1D5DB", fontSize: 13, fontFamily: "inherit", background: "#FAFBFC", cursor: "pointer", fontWeight: 500 }}>
-            {EMPLOYEES.map(e => <option key={e.id} value={e.id}>{e.name} ({e.role})</option>)}
-          </select>
-          <Avatar initials={user.avatar} color={isEA ? "#7C3AED" : "#2D5BFF"} />
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{user.name}</div>
+            <div style={{ fontSize: 11, color: "#9CA3AF" }}>{user.role} · {user.dept}</div>
+          </div>
+          <Avatar initials={user.avatar} picture={session.picture} color={isEA ? "#7C3AED" : "#2D5BFF"} />
+          <button onClick={handleLogout} title="Sign out"
+            style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", fontSize: 12, color: "#6B7280", fontWeight: 500 }}>
+            Sign out
+          </button>
         </div>
       </header>
 
-      {/* ── LAYOUT ── */}
       <div className="app-layout" style={{ display: "flex", minHeight: "calc(100vh - 64px)" }}>
 
-        {/* ── SIDEBAR ── */}
+        {/* Sidebar */}
         <nav className="sidebar" style={{ width: 220, background: "#fff", borderRight: "1px solid #E5E7EB", padding: "20px 0", flexShrink: 0 }}>
           <div className="user-info" style={{ padding: "0 16px 16px", borderBottom: "1px solid #F3F4F6", marginBottom: 8 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>
@@ -238,12 +380,14 @@ function App() {
               </button>
             ))}
           </div>
-          <div style={{ padding: "16px", marginTop: 16, borderTop: "1px solid #F3F4F6" }}>
-            <button onClick={resetData} style={{ ...btnS, width: "100%", fontSize: 12, padding: "8px 12px" }}>↺ Reset Sample Data</button>
+          <div style={{ padding: "12px 16px", marginTop: 12, borderTop: "1px solid #F3F4F6" }}>
+            <button onClick={refreshData} style={{ ...btnS, width: "100%", fontSize: 12, padding: "8px 12px" }}>
+              {"\u{1F504}"} Refresh Data
+            </button>
           </div>
         </nav>
 
-        {/* ── MAIN ── */}
+        {/* Main Content */}
         <main className="main-content" style={{ flex: 1, padding: 28, overflowY: "auto", maxHeight: "calc(100vh - 64px)" }}>
 
           {/* ═══ DASHBOARD ═══ */}
@@ -253,19 +397,19 @@ function App() {
               <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>{isEA ? "Overview of all office problems and task assignments" : `Welcome back, ${user.name.split(" ")[0]}`}</p>
 
               <div className="stat-row" style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 28 }}>
-                <StatCard label="Open Problems" value={openProblems.length} color="#8B5CF6" icon="🔔" />
-                <StatCard label={isEA ? "Total Tasks" : "My Tasks"} value={isEA ? tasks.length : myTasks.length} color="#2D5BFF" icon="📌" />
-                <StatCard label="In Progress" value={(isEA ? tasks : myTasks).filter(t => t.status === "In Progress").length} color="#F59E0B" icon="⏳" />
-                <StatCard label="Completed" value={(isEA ? tasks : myTasks).filter(t => t.status === "Completed").length} color="#10B981" icon="✅" />
+                <StatCard label={isEA ? "Open Problems" : "My Problems"} value={isEA ? openProblems.length : myProblems.length} color="#8B5CF6" icon={"\u{1F514}"} />
+                <StatCard label={isEA ? "Total Tasks" : "My Tasks"} value={myTasks.length} color="#2D5BFF" icon={"\u{1F4CC}"} />
+                <StatCard label="In Progress" value={myTasks.filter(t => t.status === "In Progress").length} color="#F59E0B" icon={"\u{23F3}"} />
+                <StatCard label="Completed" value={myTasks.filter(t => t.status === "Completed").length} color="#10B981" icon={"\u{2705}"} />
               </div>
 
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", overflow: "hidden" }}>
                 <div style={{ padding: "16px 20px", borderBottom: "1px solid #F3F4F6", fontWeight: 700, fontSize: 15 }}>Recent Activity</div>
-                {[...problems.slice(0, 4).map(p => ({ type: "problem", data: p, date: p.date })),
-                  ...tasks.slice(0, 4).map(t => ({ type: "task", data: t, date: t.createdDate }))]
-                  .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6)
+                {[...myProblems.slice(0, 4).map(p => ({ type: "problem", data: p, date: p.date })),
+                  ...myTasks.slice(0, 4).map(t => ({ type: "task", data: t, date: t.createdDate }))]
+                  .sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 6)
                   .map((item, i) => (
-                    <div key={i} style={{ padding: "14px 20px", borderBottom: "1px solid #F9FAFB", display: "flex", alignItems: "center", gap: 14, animation: `slideIn ${0.2 + i * 0.05}s` }}>
+                    <div key={i} style={{ padding: "14px 20px", borderBottom: "1px solid #F9FAFB", display: "flex", alignItems: "center", gap: 14 }}>
                       <div style={{ width: 8, height: 8, borderRadius: "50%", background: item.type === "problem" ? "#8B5CF6" : "#2D5BFF", flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -273,29 +417,32 @@ function App() {
                           {item.data.title}
                         </div>
                         <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>
-                          {item.type === "problem" ? `Reported by ${getName(item.data.reportedBy)}` : `Assigned to ${getName(item.data.assignedTo)}`} · {item.date}
+                          {item.type === "problem" ? `Reported by ${item.data.reportedBy}` : `Assigned to ${item.data.assigneeName || item.data.assignedTo}`} · {item.date}
                         </div>
                       </div>
                       <Badge text={item.data.status} color={statusColor(item.data.status)} />
                       <Badge text={item.data.priority} color={priorityColor(item.data.priority)} />
                     </div>
                   ))}
+                {myProblems.length === 0 && myTasks.length === 0 && (
+                  <div style={{ padding: 32, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No activity yet</div>
+                )}
               </div>
 
               {!isEA && (
                 <div style={{ marginTop: 24, display: "flex", gap: 12 }}>
-                  <button style={btnP} onClick={() => setView("report")}>🚨 Report a Problem</button>
-                  <button style={btnS} onClick={() => setView("mytasks")}>✅ View My Tasks</button>
+                  <button style={btnP} onClick={() => setView("report")}>{"\u{1F6A8}"} Report a Problem</button>
+                  <button style={btnS} onClick={() => setView("mytasks")}>{"\u{2705}"} View My Tasks</button>
                 </div>
               )}
             </div>
           )}
 
-          {/* ═══ REPORT PROBLEM (Employee) ═══ */}
-          {view === "report" && (
+          {/* ═══ REPORT PROBLEM ═══ */}
+          {view === "report" && !isEA && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>Report a Problem</h2>
-              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Submit your issue — the EA will review and assign it to the right person</p>
+              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Submit your issue — the EA will review and assign it</p>
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 28, maxWidth: 600 }}>
                 <div style={{ marginBottom: 18 }}>
                   <label style={lbl}>Problem Title *</label>
@@ -319,18 +466,18 @@ function App() {
                   <label style={lbl}>Description</label>
                   <textarea style={{ ...inp, minHeight: 100, resize: "vertical" }} placeholder="Describe your problem in detail..." value={problemForm.description} onChange={e => setProblemForm(f => ({ ...f, description: e.target.value }))} />
                 </div>
-                <button style={btnP} onClick={submitProblem}>Submit Problem</button>
+                <button style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitProblem} disabled={saving}>Submit Problem</button>
               </div>
             </div>
           )}
 
-          {/* ═══ MY TASKS (Employee) ═══ */}
-          {view === "mytasks" && (
+          {/* ═══ MY TASKS ═══ */}
+          {view === "mytasks" && !isEA && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>My Tasks</h2>
               <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Tasks assigned to you by the EA</p>
               {myTasks.length === 0
-                ? <EmptyState icon="📭" title="No tasks assigned yet" subtitle="Tasks assigned by the EA will appear here" />
+                ? <EmptyState icon={"\u{1F4ED}"} title="No tasks assigned yet" subtitle="Tasks assigned by the EA will appear here" />
                 : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     {myTasks.map(t => (
                       <div key={t.id} style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 20 }}>
@@ -344,14 +491,14 @@ function App() {
                             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{t.title}</div>
                             <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>{t.description}</div>
                             <div style={{ fontSize: 12, color: "#9CA3AF" }}>
-                              Assigned by {getName(t.assignedBy)} · Due: {t.dueDate || "No deadline"}
+                              Due: {t.dueDate || "No deadline"}
                               {t.linkedProblem && <span> · Linked: {t.linkedProblem}</span>}
                             </div>
                           </div>
                           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                            {t.status === "Pending" && <button style={{ ...btnS, fontSize: 12, padding: "6px 14px" }} onClick={() => updateTaskStatus(t.id, "In Progress")}>▶ Start Task</button>}
-                            {t.status === "In Progress" && <button style={{ ...btnP, fontSize: 12, padding: "6px 14px", background: "#10B981" }} onClick={() => updateTaskStatus(t.id, "Completed")}>✓ Mark Done</button>}
-                            {t.status === "Completed" && <span style={{ fontSize: 12, color: "#10B981", fontWeight: 600 }}>✅ Done</span>}
+                            {t.status === "Pending" && <button style={{ ...btnS, fontSize: 12, padding: "6px 14px" }} onClick={() => updateTaskStatus(t.id, "In Progress")}>{"\u{25B6}"} Start Task</button>}
+                            {t.status === "In Progress" && <button style={{ ...btnP, fontSize: 12, padding: "6px 14px", background: "#10B981" }} onClick={() => updateTaskStatus(t.id, "Completed")}>{"\u{2713}"} Mark Done</button>}
+                            {t.status === "Completed" && <span style={{ fontSize: 12, color: "#10B981", fontWeight: 600 }}>{"\u{2705}"} Done</span>}
                           </div>
                         </div>
                       </div>
@@ -361,13 +508,13 @@ function App() {
             </div>
           )}
 
-          {/* ═══ MY PROBLEMS (Employee) ═══ */}
-          {view === "myproblems" && (
+          {/* ═══ MY PROBLEMS ═══ */}
+          {view === "myproblems" && !isEA && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>My Reported Problems</h2>
               <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Track the status of issues you've reported</p>
               {myProblems.length === 0
-                ? <EmptyState icon="📝" title="No problems reported" subtitle='Go to "Report Problem" to submit an issue' />
+                ? <EmptyState icon={"\u{1F4DD}"} title="No problems reported" subtitle='Go to "Report Problem" to submit an issue' />
                 : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     {myProblems.map(p => (
                       <div key={p.id} style={{ background: "#fff", borderRadius: 12, border: `1px solid ${p.status === "Resolved" ? "#D1FAE5" : "#E5E7EB"}`, padding: 20 }}>
@@ -391,45 +538,43 @@ function App() {
           {view === "problems" && isEA && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>All Reported Problems</h2>
-              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>
-                Review problems and click "Assign Task" to delegate resolution · <strong>{openProblems.length} open</strong>
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {problems.map(p => (
-                  <div key={p.id} style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 20 }}>
-                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                      <div style={{ flex: 1, minWidth: 200 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                          <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{p.id}</span>
-                          <Badge text={p.category} color="#6B7280" />
-                          <Badge text={p.priority} color={priorityColor(p.priority)} />
-                          <Badge text={p.status} color={statusColor(p.status)} />
-                        </div>
-                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{p.title}</div>
-                        <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>{p.description}</div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#9CA3AF" }}>
-                          <Avatar initials={getAvatar(p.reportedBy)} size={22} color="#6B7280" />
-                          {getName(p.reportedBy)} · {p.date}
+              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Review and assign tasks to resolve problems · <strong>{openProblems.length} open</strong></p>
+              {problems.length === 0
+                ? <EmptyState icon={"\u{1F4CB}"} title="No problems reported yet" />
+                : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {problems.map(p => (
+                      <div key={p.id} style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 20 }}>
+                        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                          <div style={{ flex: 1, minWidth: 200 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                              <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{p.id}</span>
+                              <Badge text={p.category} color="#6B7280" />
+                              <Badge text={p.priority} color={priorityColor(p.priority)} />
+                              <Badge text={p.status} color={statusColor(p.status)} />
+                            </div>
+                            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{p.title}</div>
+                            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>{p.description}</div>
+                            <div style={{ fontSize: 12, color: "#9CA3AF" }}>Reported by: {p.reportedBy} · {p.date}</div>
+                          </div>
+                          {p.status === "Open" && (
+                            <button style={{ ...btnP, fontSize: 12, padding: "8px 16px", background: "#7C3AED", flexShrink: 0 }}
+                              onClick={() => {
+                                setTaskForm(f => ({ ...f, title: `Resolve: ${p.title}`, description: p.description, linkedProblem: p.id, priority: p.priority }));
+                                setView("assign");
+                              }}>
+                              Assign Task {"\u{2192}"}
+                            </button>
+                          )}
+                          {p.status !== "Open" && (
+                            <span style={{ fontSize: 12, color: statusColor(p.status), fontWeight: 600 }}>
+                              {p.status === "Assigned" ? "\u{23F3} Task assigned" : p.status === "Resolved" ? "\u{2705} Resolved" : p.status}
+                            </span>
+                          )}
                         </div>
                       </div>
-                      {p.status === "Open" && (
-                        <button style={{ ...btnP, fontSize: 12, padding: "8px 16px", background: "#7C3AED", flexShrink: 0 }}
-                          onClick={() => {
-                            setTaskForm(f => ({ ...f, title: `Resolve: ${p.title}`, description: p.description, linkedProblem: p.id, priority: p.priority }));
-                            setView("assign");
-                          }}>
-                          Assign Task →
-                        </button>
-                      )}
-                      {p.status !== "Open" && (
-                        <span style={{ fontSize: 12, color: statusColor(p.status), fontWeight: 600 }}>
-                          {p.status === "Assigned" ? "⏳ Task assigned" : p.status === "Resolved" ? "✅ Resolved" : p.status}
-                        </span>
-                      )}
-                    </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+              }
             </div>
           )}
 
@@ -441,10 +586,10 @@ function App() {
                   <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>All Tasks</h2>
                   <p style={{ margin: "6px 0 0", color: "#6B7280", fontSize: 14 }}>Monitor progress of every assigned task</p>
                 </div>
-                <button style={btnP} onClick={() => setView("assign")}>➕ New Task</button>
+                <button style={btnP} onClick={() => setView("assign")}>{"\u{2795}"} New Task</button>
               </div>
               {tasks.length === 0
-                ? <EmptyState icon="📌" title="No tasks created yet" subtitle='Go to "Assign Task" to create one' />
+                ? <EmptyState icon={"\u{1F4CC}"} title="No tasks created yet" subtitle='Go to "Assign Task" to create one' />
                 : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     {tasks.map(t => (
                       <div key={t.id} style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : "#E5E7EB"}`, padding: 20 }}>
@@ -456,10 +601,8 @@ function App() {
                         <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{t.title}</div>
                         <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>{t.description}</div>
                         <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 12, color: "#9CA3AF", flexWrap: "wrap" }}>
-                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <Avatar initials={getAvatar(t.assignedTo)} size={20} color="#2D5BFF" /> {getName(t.assignedTo)}
-                          </span>
-                          <span>Due: {t.dueDate || "—"}</span>
+                          <span>{"\u{1F464}"} {t.assigneeName || t.assignedTo}</span>
+                          <span>Due: {t.dueDate || "\u{2014}"}</span>
                           {t.linkedProblem && <span>Linked: {t.linkedProblem}</span>}
                           <span>Created: {t.createdDate}</span>
                         </div>
@@ -478,7 +621,7 @@ function App() {
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 28, maxWidth: 600 }}>
                 {taskForm.linkedProblem && (
                   <div style={{ background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 8, padding: "10px 14px", marginBottom: 20, fontSize: 13, color: "#4338CA" }}>
-                    🔗 Linked to problem <strong>{taskForm.linkedProblem}</strong> — completing this task will auto-resolve the problem
+                    {"\u{1F517}"} Linked to problem <strong>{taskForm.linkedProblem}</strong> — completing this task will auto-resolve the problem
                   </div>
                 )}
                 <div style={{ marginBottom: 18 }}>
@@ -493,7 +636,8 @@ function App() {
                   <div style={{ flex: 1, minWidth: 160 }}>
                     <label style={lbl}>Assign To *</label>
                     <select style={inp} value={taskForm.assignedTo} onChange={e => setTaskForm(f => ({ ...f, assignedTo: e.target.value }))}>
-                      {EMPLOYEES.filter(e => e.role !== "EA").map(e => <option key={e.id} value={e.id}>{e.name} — {e.dept}</option>)}
+                      <option value="">-- Select Employee --</option>
+                      {employees.filter(e => e.role !== "EA").map(e => <option key={e.email} value={e.email}>{e.name} — {e.dept}</option>)}
                     </select>
                   </div>
                   <div style={{ flex: 1, minWidth: 160 }}>
@@ -511,14 +655,14 @@ function App() {
                   <div style={{ flex: 1, minWidth: 160 }}>
                     <label style={lbl}>Link to Problem</label>
                     <select style={inp} value={taskForm.linkedProblem} onChange={e => setTaskForm(f => ({ ...f, linkedProblem: e.target.value }))}>
-                      <option value="">— None —</option>
+                      <option value="">{"\u{2014}"} None {"\u{2014}"}</option>
                       {problems.filter(p => p.status === "Open").map(p => <option key={p.id} value={p.id}>{p.id}: {p.title}</option>)}
                     </select>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 12 }}>
-                  <button style={btnP} onClick={submitTask}>Assign Task</button>
-                  <button style={btnS} onClick={() => setTaskForm({ title: "", description: "", assignedTo: "e1", priority: "Medium", dueDate: "", linkedProblem: "" })}>Clear</button>
+                  <button style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitTask} disabled={saving}>Assign Task</button>
+                  <button style={btnS} onClick={() => setTaskForm({ title: "", description: "", assignedTo: "", priority: "Medium", dueDate: "", linkedProblem: "" })}>Clear</button>
                 </div>
               </div>
             </div>
@@ -526,13 +670,29 @@ function App() {
 
         </main>
       </div>
-
-      {/* ── FOOTER ── */}
-      <div style={{ textAlign: "center", padding: "16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #E5E7EB", background: "#fff" }}>
-        OfficeDesk v1.0 · Task & Problem Management System · {new Date().getFullYear()}
-      </div>
     </div>
   );
+}
+
+// ══════════════════════════════════════════════════
+// ║  ROOT APP — handles auth state
+// ══════════════════════════════════════════════════
+function App() {
+  const [session, setSession] = useState(() => {
+    try {
+      const stored = sessionStorage.getItem('officedesk_session');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Session expires after 8 hours
+        if (Date.now() - parsed.loginTime < 8 * 60 * 60 * 1000) return parsed;
+        sessionStorage.removeItem('officedesk_session');
+      }
+    } catch {}
+    return null;
+  });
+
+  if (!session) return <LoginScreen onLogin={setSession} />;
+  return <Dashboard session={session} onLogout={() => setSession(null)} />;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
