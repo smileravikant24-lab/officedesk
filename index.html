@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OfficeDesk — Task & Problem Management</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; background: #F3F4F8; color: #1A1D23; }
+    select, input, textarea, button { font-family: inherit; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .app-layout { flex-direction: column !important; }
+      .sidebar { width: 100% !important; border-right: none !important; border-bottom: 1px solid #E5E7EB; padding: 10px 0 !important; }
+      .sidebar .nav-section { display: flex; overflow-x: auto; gap: 0 !important; padding: 0 8px !important; }
+      .sidebar .nav-btn { white-space: nowrap; border-right: none !important; border-bottom: 3px solid transparent !important; padding: 8px 14px !important; font-size: 12px !important; }
+      .sidebar .nav-btn.active { border-bottom-color: #2D5BFF !important; border-right-color: transparent !important; }
+      .sidebar .user-info { display: none; }
+      .main-content { padding: 16px !important; }
+      .stat-row { flex-direction: column !important; }
+      .form-row { flex-direction: column !important; }
+      .header-inner { padding: 0 14px !important; }
+      .header-select { max-width: 160px; font-size: 12px !important; }
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+/* ═══════════════ DATA ═══════════════ */
+const EMPLOYEES = [
+  { id: "ea1", name: "Priya Sharma", role: "EA", dept: "Administration", avatar: "PS" },
+  { id: "e1", name: "Rahul Verma", role: "Employee", dept: "Engineering", avatar: "RV" },
+  { id: "e2", name: "Anita Desai", role: "Employee", dept: "Marketing", avatar: "AD" },
+  { id: "e3", name: "Vikram Singh", role: "Employee", dept: "Finance", avatar: "VS" },
+  { id: "e4", name: "Meena Patel", role: "Employee", dept: "HR", avatar: "MP" },
+  { id: "e5", name: "Arjun Nair", role: "Employee", dept: "Operations", avatar: "AN" },
+];
+
+const CATEGORIES = ["IT Issue", "Facility", "HR Query", "Admin Request", "Equipment", "Other"];
+const PRIORITIES = ["Low", "Medium", "High", "Urgent"];
+
+/* ═══════════════ LOCALSTORAGE HELPERS ═══════════════ */
+function loadData(key, fallback) {
+  try {
+    const stored = localStorage.getItem("officedesk_" + key);
+    return stored ? JSON.parse(stored) : fallback;
+  } catch { return fallback; }
+}
+function saveData(key, data) {
+  try { localStorage.setItem("officedesk_" + key, JSON.stringify(data)); } catch {}
+}
+
+const defaultProblems = [
+  { id: "P-001", title: "Printer not working on 3rd floor", category: "IT Issue", priority: "High", description: "The main printer near the conference room is jammed and showing error E-302.", reportedBy: "e1", date: "2026-08-12", status: "Open" },
+  { id: "P-002", title: "AC not cooling in marketing bay", category: "Facility", priority: "Medium", description: "Temperature in the marketing area stays at 30°C despite AC running all day.", reportedBy: "e2", date: "2026-08-13", status: "Assigned" },
+  { id: "P-003", title: "Need new ergonomic chair", category: "Equipment", priority: "Low", description: "My current chair's backrest is broken. Requesting a replacement.", reportedBy: "e3", date: "2026-08-13", status: "Open" },
+];
+
+const defaultTasks = [
+  { id: "T-001", title: "Fix AC in marketing bay", description: "Coordinate with HVAC vendor to inspect and repair the AC unit in marketing area.", assignedTo: "e5", assignedBy: "ea1", linkedProblem: "P-002", priority: "Medium", status: "In Progress", dueDate: "2026-08-15", createdDate: "2026-08-13" },
+];
+
+/* ═══════════════ SMALL COMPONENTS ═══════════════ */
+const priorityColor = (p) => ({ Low: "#6B7280", Medium: "#2563EB", High: "#F59E0B", Urgent: "#EF4444" }[p] || "#6B7280");
+const statusColor = (s) => ({ Open: "#8B5CF6", Assigned: "#2563EB", "In Progress": "#F59E0B", Resolved: "#10B981", Closed: "#6B7280", Pending: "#8B5CF6", Completed: "#10B981" }[s] || "#6B7280");
+const getName = (id) => EMPLOYEES.find(e => e.id === id)?.name || "Unknown";
+const getAvatar = (id) => EMPLOYEES.find(e => e.id === id)?.avatar || "??";
+
+function Badge({ text, color }) {
+  return <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 999, fontSize: 11, fontWeight: 600, letterSpacing: 0.3, background: color + "18", color, border: `1px solid ${color}40`, textTransform: "uppercase" }}>{text}</span>;
+}
+
+function Avatar({ initials, size = 36, color = "#2D5BFF" }) {
+  return <div style={{ width: size, height: size, borderRadius: "50%", background: color + "16", color, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: size * 0.36, letterSpacing: 0.5, flexShrink: 0 }}>{initials}</div>;
+}
+
+function StatCard({ label, value, color, icon }) {
+  return (
+    <div style={{ background: "#fff", borderRadius: 12, padding: "20px 22px", flex: 1, minWidth: 130, boxShadow: "0 1px 3px #0001", border: "1px solid #E5E7EB" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+        <span style={{ fontSize: 22 }}>{icon}</span>
+        <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
+      </div>
+      <div style={{ fontSize: 32, fontWeight: 800, color }}>{value}</div>
+    </div>
+  );
+}
+
+function EmptyState({ icon, title, subtitle }) {
+  return (
+    <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: "48px 24px", textAlign: "center", color: "#9CA3AF" }}>
+      <div style={{ fontSize: 40, marginBottom: 12 }}>{icon}</div>
+      <div style={{ fontWeight: 600, fontSize: 15 }}>{title}</div>
+      {subtitle && <div style={{ fontSize: 13, marginTop: 4 }}>{subtitle}</div>}
+    </div>
+  );
+}
+
+/* ═══════════════ MAIN APP ═══════════════ */
+function App() {
+  const [currentUser, setCurrentUser] = useState(loadData("currentUser", "ea1"));
+  const [view, setView] = useState("dashboard");
+  const [problems, setProblems] = useState(() => loadData("problems", defaultProblems));
+  const [tasks, setTasks] = useState(() => loadData("tasks", defaultTasks));
+  const [notification, setNotification] = useState(null);
+
+  const [problemForm, setProblemForm] = useState({ title: "", category: "IT Issue", priority: "Medium", description: "" });
+  const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "e1", priority: "Medium", dueDate: "", linkedProblem: "" });
+
+  // Persist to localStorage
+  useEffect(() => { saveData("problems", problems); }, [problems]);
+  useEffect(() => { saveData("tasks", tasks); }, [tasks]);
+  useEffect(() => { saveData("currentUser", currentUser); }, [currentUser]);
+
+  const isEA = EMPLOYEES.find(e => e.id === currentUser)?.role === "EA";
+  const user = EMPLOYEES.find(e => e.id === currentUser);
+  const notify = (msg) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
+
+  const nextId = (prefix, list) => `${prefix}-${String(list.length + 1).padStart(3, "0")}`;
+
+  const submitProblem = () => {
+    if (!problemForm.title.trim()) { notify("Please enter a title"); return; }
+    const p = { id: nextId("P", problems), ...problemForm, reportedBy: currentUser, date: new Date().toISOString().split("T")[0], status: "Open" };
+    setProblems(prev => [p, ...prev]);
+    setProblemForm({ title: "", category: "IT Issue", priority: "Medium", description: "" });
+    notify("Problem registered successfully!");
+  };
+
+  const submitTask = () => {
+    if (!taskForm.title.trim()) { notify("Please enter a task title"); return; }
+    const t = { id: nextId("T", tasks), ...taskForm, assignedBy: currentUser, status: "Pending", createdDate: new Date().toISOString().split("T")[0] };
+    setTasks(prev => [t, ...prev]);
+    if (taskForm.linkedProblem) {
+      setProblems(prev => prev.map(p => p.id === taskForm.linkedProblem ? { ...p, status: "Assigned" } : p));
+    }
+    setTaskForm({ title: "", description: "", assignedTo: "e1", priority: "Medium", dueDate: "", linkedProblem: "" });
+    notify("Task assigned to " + getName(taskForm.assignedTo) + "!");
+  };
+
+  const updateTaskStatus = (taskId, status) => {
+    setTasks(prev => prev.map(t => {
+      if (t.id !== taskId) return t;
+      const updated = { ...t, status };
+      if (status === "Completed" && updated.linkedProblem) {
+        setProblems(pp => pp.map(p => p.id === updated.linkedProblem ? { ...p, status: "Resolved" } : p));
+      }
+      return updated;
+    }));
+    notify("Task updated to " + status);
+  };
+
+  const resetData = () => {
+    setProblems(defaultProblems);
+    setTasks(defaultTasks);
+    notify("Sample data restored!");
+  };
+
+  const myTasks = tasks.filter(t => t.assignedTo === currentUser);
+  const myProblems = problems.filter(p => p.reportedBy === currentUser);
+  const openProblems = problems.filter(p => p.status === "Open");
+
+  const navItems = isEA
+    ? [{ key: "dashboard", label: "Dashboard", icon: "📊" }, { key: "problems", label: "Problems", icon: "📋" }, { key: "tasks", label: "All Tasks", icon: "📌" }, { key: "assign", label: "Assign Task", icon: "➕" }]
+    : [{ key: "dashboard", label: "Dashboard", icon: "📊" }, { key: "report", label: "Report Problem", icon: "🚨" }, { key: "mytasks", label: "My Tasks", icon: "✅" }, { key: "myproblems", label: "My Problems", icon: "📝" }];
+
+  const inp = { width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #D1D5DB", fontSize: 14, outline: "none", fontFamily: "inherit", boxSizing: "border-box", background: "#FAFBFC" };
+  const lbl = { display: "block", marginBottom: 4, fontSize: 12, fontWeight: 600, color: "#374151", letterSpacing: 0.3 };
+  const btnP = { padding: "10px 24px", borderRadius: 8, border: "none", background: "#2D5BFF", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" };
+  const btnS = { ...btnP, background: "#F3F4F6", color: "#374151" };
+
+  return (
+    <div style={{ minHeight: "100vh" }}>
+
+      {/* ── NOTIFICATION ── */}
+      {notification && (
+        <div style={{ position: "fixed", top: 16, right: 16, background: "#10B981", color: "#fff", padding: "12px 24px", borderRadius: 10, fontWeight: 600, fontSize: 14, zIndex: 999, boxShadow: "0 4px 20px #10B98140", animation: "fadeIn 0.3s" }}>
+          ✓ {notification}
+        </div>
+      )}
+
+      {/* ── HEADER ── */}
+      <header style={{ background: "#fff", borderBottom: "1px solid #E5E7EB", height: 64, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 28px" }} className="header-inner">
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: "linear-gradient(135deg, #2D5BFF, #7C3AED)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 16 }}>O</div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.2 }}>OfficeDesk</div>
+            <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500 }}>Task & Problem Management</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <select className="header-select" value={currentUser} onChange={e => { setCurrentUser(e.target.value); setView("dashboard"); }}
+            style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #D1D5DB", fontSize: 13, fontFamily: "inherit", background: "#FAFBFC", cursor: "pointer", fontWeight: 500 }}>
+            {EMPLOYEES.map(e => <option key={e.id} value={e.id}>{e.name} ({e.role})</option>)}
+          </select>
+          <Avatar initials={user.avatar} color={isEA ? "#7C3AED" : "#2D5BFF"} />
+        </div>
+      </header>
+
+      {/* ── LAYOUT ── */}
+      <div className="app-layout" style={{ display: "flex", minHeight: "calc(100vh - 64px)" }}>
+
+        {/* ── SIDEBAR ── */}
+        <nav className="sidebar" style={{ width: 220, background: "#fff", borderRight: "1px solid #E5E7EB", padding: "20px 0", flexShrink: 0 }}>
+          <div className="user-info" style={{ padding: "0 16px 16px", borderBottom: "1px solid #F3F4F6", marginBottom: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>
+              {isEA ? "EA Panel" : "Employee Panel"}
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{user.name}</div>
+            <div style={{ fontSize: 11, color: "#9CA3AF" }}>{user.dept}</div>
+          </div>
+          <div className="nav-section">
+            {navItems.map(item => (
+              <button key={item.key} className={`nav-btn ${view === item.key ? "active" : ""}`}
+                onClick={() => setView(item.key)}
+                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 20px", border: "none",
+                  background: view === item.key ? "#EEF2FF" : "transparent",
+                  color: view === item.key ? "#2D5BFF" : "#4B5563",
+                  fontSize: 13.5, fontWeight: view === item.key ? 600 : 500, cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                  borderRight: view === item.key ? "3px solid #2D5BFF" : "3px solid transparent", transition: "all 0.15s" }}>
+                <span style={{ fontSize: 16 }}>{item.icon}</span> {item.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ padding: "16px", marginTop: 16, borderTop: "1px solid #F3F4F6" }}>
+            <button onClick={resetData} style={{ ...btnS, width: "100%", fontSize: 12, padding: "8px 12px" }}>↺ Reset Sample Data</button>
+          </div>
+        </nav>
+
+        {/* ── MAIN ── */}
+        <main className="main-content" style={{ flex: 1, padding: 28, overflowY: "auto", maxHeight: "calc(100vh - 64px)" }}>
+
+          {/* ═══ DASHBOARD ═══ */}
+          {view === "dashboard" && (
+            <div style={{ animation: "slideIn 0.3s" }}>
+              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>{isEA ? "EA Dashboard" : "My Dashboard"}</h2>
+              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>{isEA ? "Overview of all office problems and task assignments" : `Welcome back, ${user.name.split(" ")[0]}`}</p>
+
+              <div className="stat-row" style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 28 }}>
+                <StatCard label="Open Problems" value={openProblems.length} color="#8B5CF6" icon="🔔" />
+                <StatCard label={isEA ? "Total Tasks" : "My Tasks"} value={isEA ? tasks.length : myTasks.length} color="#2D5BFF" icon="📌" />
+                <StatCard label="In Progress" value={(isEA ? tasks : myTasks).filter(t => t.status === "In Progress").length} color="#F59E0B" icon="⏳" />
+                <StatCard label="Completed" value={(isEA ? tasks : myTasks).filter(t => t.status === "Completed").length} color="#10B981" icon="✅" />
+              </div>
+
+              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", overflow: "hidden" }}>
+                <div style={{ padding: "16px 20px", borderBottom: "1px solid #F3F4F6", fontWeight: 700, fontSize: 15 }}>Recent Activity</div>
+                {[...problems.slice(0, 4).map(p => ({ type: "problem", data: p, date: p.date })),
+                  ...tasks.slice(0, 4).map(t => ({ type: "task", data: t, date: t.createdDate }))]
+                  .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6)
+                  .map((item, i) => (
+                    <div key={i} style={{ padding: "14px 20px", borderBottom: "1px solid #F9FAFB", display: "flex", alignItems: "center", gap: 14, animation: `slideIn ${0.2 + i * 0.05}s` }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: item.type === "problem" ? "#8B5CF6" : "#2D5BFF", flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          <span style={{ color: "#9CA3AF", marginRight: 8, fontFamily: "monospace", fontSize: 12 }}>{item.data.id}</span>
+                          {item.data.title}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>
+                          {item.type === "problem" ? `Reported by ${getName(item.data.reportedBy)}` : `Assigned to ${getName(item.data.assignedTo)}`} · {item.date}
+                        </div>
+                      </div>
+                      <Badge text={item.data.status} color={statusColor(item.data.status)} />
+                      <Badge text={item.data.priority} color={priorityColor(item.data.priority)} />
+                    </div>
+                  ))}
+              </div>
+
+              {!isEA && (
+                <div style={{ marginTop: 24, display: "flex", gap: 12 }}>
+                  <button style={btnP} onClick={() => setView("report")}>🚨 Report a Problem</button>
+                  <button style={btnS} onClick={() => setView("mytasks")}>✅ View My Tasks</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ═══ REPORT PROBLEM (Employee) ═══ */}
+          {view === "report" && (
+            <div style={{ animation: "slideIn 0.3s" }}>
+              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>Report a Problem</h2>
+              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Submit your issue — the EA will review and assign it to the right person</p>
+              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 28, maxWidth: 600 }}>
+                <div style={{ marginBottom: 18 }}>
+                  <label style={lbl}>Problem Title *</label>
+                  <input style={inp} placeholder="e.g., Projector not working in Room 5" value={problemForm.title} onChange={e => setProblemForm(f => ({ ...f, title: e.target.value }))} />
+                </div>
+                <div className="form-row" style={{ display: "flex", gap: 16, marginBottom: 18 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={lbl}>Category</label>
+                    <select style={inp} value={problemForm.category} onChange={e => setProblemForm(f => ({ ...f, category: e.target.value }))}>
+                      {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={lbl}>Priority</label>
+                    <select style={inp} value={problemForm.priority} onChange={e => setProblemForm(f => ({ ...f, priority: e.target.value }))}>
+                      {PRIORITIES.map(p => <option key={p}>{p}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div style={{ marginBottom: 24 }}>
+                  <label style={lbl}>Description</label>
+                  <textarea style={{ ...inp, minHeight: 100, resize: "vertical" }} placeholder="Describe your problem in detail..." value={problemForm.description} onChange={e => setProblemForm(f => ({ ...f, description: e.target.value }))} />
+                </div>
+                <button style={btnP} onClick={submitProblem}>Submit Problem</button>
+              </div>
+            </div>
+          )}
+
+          {/* ═══ MY TASKS (Employee) ═══ */}
+          {view === "mytasks" && (
+            <div style={{ animation: "slideIn 0.3s" }}>
+              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>My Tasks</h2>
+              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Tasks assigned to you by the EA</p>
+              {myTasks.length === 0
+                ? <EmptyState icon="📭" title="No tasks assigned yet" subtitle="Tasks assigned by the EA will appear here" />
+                : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {myTasks.map(t => (
+                      <div key={t.id} style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 20 }}>
+                        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                          <div style={{ flex: 1, minWidth: 200 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                              <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
+                              <Badge text={t.priority} color={priorityColor(t.priority)} />
+                              <Badge text={t.status} color={statusColor(t.status)} />
+                            </div>
+                            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{t.title}</div>
+                            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>{t.description}</div>
+                            <div style={{ fontSize: 12, color: "#9CA3AF" }}>
+                              Assigned by {getName(t.assignedBy)} · Due: {t.dueDate || "No deadline"}
+                              {t.linkedProblem && <span> · Linked: {t.linkedProblem}</span>}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                            {t.status === "Pending" && <button style={{ ...btnS, fontSize: 12, padding: "6px 14px" }} onClick={() => updateTaskStatus(t.id, "In Progress")}>▶ Start Task</button>}
+                            {t.status === "In Progress" && <button style={{ ...btnP, fontSize: 12, padding: "6px 14px", background: "#10B981" }} onClick={() => updateTaskStatus(t.id, "Completed")}>✓ Mark Done</button>}
+                            {t.status === "Completed" && <span style={{ fontSize: 12, color: "#10B981", fontWeight: 600 }}>✅ Done</span>}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+              }
+            </div>
+          )}
+
+          {/* ═══ MY PROBLEMS (Employee) ═══ */}
+          {view === "myproblems" && (
+            <div style={{ animation: "slideIn 0.3s" }}>
+              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>My Reported Problems</h2>
+              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Track the status of issues you've reported</p>
+              {myProblems.length === 0
+                ? <EmptyState icon="📝" title="No problems reported" subtitle='Go to "Report Problem" to submit an issue' />
+                : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {myProblems.map(p => (
+                      <div key={p.id} style={{ background: "#fff", borderRadius: 12, border: `1px solid ${p.status === "Resolved" ? "#D1FAE5" : "#E5E7EB"}`, padding: 20 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                          <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{p.id}</span>
+                          <Badge text={p.category} color="#6B7280" />
+                          <Badge text={p.priority} color={priorityColor(p.priority)} />
+                          <Badge text={p.status} color={statusColor(p.status)} />
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{p.title}</div>
+                        <div style={{ fontSize: 13, color: "#6B7280" }}>{p.description}</div>
+                        <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 6 }}>Reported on {p.date}</div>
+                      </div>
+                    ))}
+                  </div>
+              }
+            </div>
+          )}
+
+          {/* ═══ EA: ALL PROBLEMS ═══ */}
+          {view === "problems" && isEA && (
+            <div style={{ animation: "slideIn 0.3s" }}>
+              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>All Reported Problems</h2>
+              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>
+                Review problems and click "Assign Task" to delegate resolution · <strong>{openProblems.length} open</strong>
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {problems.map(p => (
+                  <div key={p.id} style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 20 }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                      <div style={{ flex: 1, minWidth: 200 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                          <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{p.id}</span>
+                          <Badge text={p.category} color="#6B7280" />
+                          <Badge text={p.priority} color={priorityColor(p.priority)} />
+                          <Badge text={p.status} color={statusColor(p.status)} />
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{p.title}</div>
+                        <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>{p.description}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#9CA3AF" }}>
+                          <Avatar initials={getAvatar(p.reportedBy)} size={22} color="#6B7280" />
+                          {getName(p.reportedBy)} · {p.date}
+                        </div>
+                      </div>
+                      {p.status === "Open" && (
+                        <button style={{ ...btnP, fontSize: 12, padding: "8px 16px", background: "#7C3AED", flexShrink: 0 }}
+                          onClick={() => {
+                            setTaskForm(f => ({ ...f, title: `Resolve: ${p.title}`, description: p.description, linkedProblem: p.id, priority: p.priority }));
+                            setView("assign");
+                          }}>
+                          Assign Task →
+                        </button>
+                      )}
+                      {p.status !== "Open" && (
+                        <span style={{ fontSize: 12, color: statusColor(p.status), fontWeight: 600 }}>
+                          {p.status === "Assigned" ? "⏳ Task assigned" : p.status === "Resolved" ? "✅ Resolved" : p.status}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ═══ EA: ALL TASKS ═══ */}
+          {view === "tasks" && isEA && (
+            <div style={{ animation: "slideIn 0.3s" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>All Tasks</h2>
+                  <p style={{ margin: "6px 0 0", color: "#6B7280", fontSize: 14 }}>Monitor progress of every assigned task</p>
+                </div>
+                <button style={btnP} onClick={() => setView("assign")}>➕ New Task</button>
+              </div>
+              {tasks.length === 0
+                ? <EmptyState icon="📌" title="No tasks created yet" subtitle='Go to "Assign Task" to create one' />
+                : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {tasks.map(t => (
+                      <div key={t.id} style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : "#E5E7EB"}`, padding: 20 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                          <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
+                          <Badge text={t.priority} color={priorityColor(t.priority)} />
+                          <Badge text={t.status} color={statusColor(t.status)} />
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{t.title}</div>
+                        <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>{t.description}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 12, color: "#9CA3AF", flexWrap: "wrap" }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <Avatar initials={getAvatar(t.assignedTo)} size={20} color="#2D5BFF" /> {getName(t.assignedTo)}
+                          </span>
+                          <span>Due: {t.dueDate || "—"}</span>
+                          {t.linkedProblem && <span>Linked: {t.linkedProblem}</span>}
+                          <span>Created: {t.createdDate}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+              }
+            </div>
+          )}
+
+          {/* ═══ EA: ASSIGN TASK ═══ */}
+          {view === "assign" && isEA && (
+            <div style={{ animation: "slideIn 0.3s" }}>
+              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>Assign New Task</h2>
+              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Create a task and assign it to an employee</p>
+              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 28, maxWidth: 600 }}>
+                {taskForm.linkedProblem && (
+                  <div style={{ background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 8, padding: "10px 14px", marginBottom: 20, fontSize: 13, color: "#4338CA" }}>
+                    🔗 Linked to problem <strong>{taskForm.linkedProblem}</strong> — completing this task will auto-resolve the problem
+                  </div>
+                )}
+                <div style={{ marginBottom: 18 }}>
+                  <label style={lbl}>Task Title *</label>
+                  <input style={inp} placeholder="e.g., Replace printer toner on 3rd floor" value={taskForm.title} onChange={e => setTaskForm(f => ({ ...f, title: e.target.value }))} />
+                </div>
+                <div style={{ marginBottom: 18 }}>
+                  <label style={lbl}>Description</label>
+                  <textarea style={{ ...inp, minHeight: 80, resize: "vertical" }} placeholder="Task details and instructions..." value={taskForm.description} onChange={e => setTaskForm(f => ({ ...f, description: e.target.value }))} />
+                </div>
+                <div className="form-row" style={{ display: "flex", gap: 16, marginBottom: 18 }}>
+                  <div style={{ flex: 1, minWidth: 160 }}>
+                    <label style={lbl}>Assign To *</label>
+                    <select style={inp} value={taskForm.assignedTo} onChange={e => setTaskForm(f => ({ ...f, assignedTo: e.target.value }))}>
+                      {EMPLOYEES.filter(e => e.role !== "EA").map(e => <option key={e.id} value={e.id}>{e.name} — {e.dept}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 160 }}>
+                    <label style={lbl}>Priority</label>
+                    <select style={inp} value={taskForm.priority} onChange={e => setTaskForm(f => ({ ...f, priority: e.target.value }))}>
+                      {PRIORITIES.map(p => <option key={p}>{p}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="form-row" style={{ display: "flex", gap: 16, marginBottom: 24 }}>
+                  <div style={{ flex: 1, minWidth: 160 }}>
+                    <label style={lbl}>Due Date</label>
+                    <input type="date" style={inp} value={taskForm.dueDate} onChange={e => setTaskForm(f => ({ ...f, dueDate: e.target.value }))} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 160 }}>
+                    <label style={lbl}>Link to Problem</label>
+                    <select style={inp} value={taskForm.linkedProblem} onChange={e => setTaskForm(f => ({ ...f, linkedProblem: e.target.value }))}>
+                      <option value="">— None —</option>
+                      {problems.filter(p => p.status === "Open").map(p => <option key={p.id} value={p.id}>{p.id}: {p.title}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button style={btnP} onClick={submitTask}>Assign Task</button>
+                  <button style={btnS} onClick={() => setTaskForm({ title: "", description: "", assignedTo: "e1", priority: "Medium", dueDate: "", linkedProblem: "" })}>Clear</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </main>
+      </div>
+
+      {/* ── FOOTER ── */}
+      <div style={{ textAlign: "center", padding: "16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #E5E7EB", background: "#fff" }}>
+        OfficeDesk v1.0 · Task & Problem Management System · {new Date().getFullYear()}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
