@@ -208,8 +208,9 @@ function Dashboard({ session, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notification, setNotification] = useState(null);
-  const [problemForm, setProblemForm] = useState({ title: "", category: "IT Issue", priority: "Medium", description: "" });
+  const [problemForm, setProblemForm] = useState({ title: "", category: "IT Issue", priority: "Medium", description: "", suggestedTo: "" });
   const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "", priority: "Medium", dueDate: "", linkedProblem: "" });
+  const [prefilledFrom, setPrefilledFrom] = useState("");
 
   const user = session.employee;
   const isEA = user.role === 'EA';
@@ -246,7 +247,7 @@ function Dashboard({ session, onLogout }) {
       const result = await api('addProblem', { email: session.email, ...problemForm });
       if (result.success) {
         notify("Problem registered successfully!");
-        setProblemForm({ title: "", category: "IT Issue", priority: "Medium", description: "" });
+        setProblemForm({ title: "", category: "IT Issue", priority: "Medium", description: "", suggestedTo: "" });
         await refreshData();
         setView("myproblems");
       } else { notify(result.error, true); }
@@ -264,6 +265,7 @@ function Dashboard({ session, onLogout }) {
       if (result.success) {
         notify("Task assigned to " + (result.task?.assigneeName || "employee") + "!");
         setTaskForm({ title: "", description: "", assignedTo: "", priority: "Medium", dueDate: "", linkedProblem: "" });
+        setPrefilledFrom("");
         await refreshData();
         setView("tasks");
       } else { notify(result.error, true); }
@@ -309,6 +311,9 @@ function Dashboard({ session, onLogout }) {
     const emp = employees.find(e => e.email === email);
     return emp ? emp.name : (email || "Unknown");
   };
+
+  // Employees a reporter can suggest (everyone except the EA and themselves)
+  const suggestableEmployees = employees.filter(e => e.role !== "EA" && e.email !== session.email);
 
   return (
     <div style={{ minHeight: "100vh" }}>
@@ -462,10 +467,23 @@ function Dashboard({ session, onLogout }) {
                     </select>
                   </div>
                 </div>
-                <div style={{ marginBottom: 24 }}>
+                <div style={{ marginBottom: 18 }}>
                   <label style={lbl}>Description</label>
                   <textarea style={{ ...inp, minHeight: 100, resize: "vertical" }} placeholder="Describe your problem in detail..." value={problemForm.description} onChange={e => setProblemForm(f => ({ ...f, description: e.target.value }))} />
                 </div>
+
+                {/* ── NEW: suggest who should handle this ── */}
+                <div style={{ marginBottom: 24 }}>
+                  <label style={lbl}>{"\u{1F464}"} Suggest Person (optional)</label>
+                  <select style={inp} value={problemForm.suggestedTo} onChange={e => setProblemForm(f => ({ ...f, suggestedTo: e.target.value }))}>
+                    <option value="">{"\u2014"} Let the EA decide {"\u2014"}</option>
+                    {suggestableEmployees.map(e => <option key={e.email} value={e.email}>{e.name} — {e.dept}</option>)}
+                  </select>
+                  <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 5, lineHeight: 1.5 }}>
+                    अगर ये काम किसी particular person का है तो यहाँ नाम चुनें — EA को problem के साथ ये suggestion दिखेगा.
+                  </div>
+                </div>
+
                 <button style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitProblem} disabled={saving}>Submit Problem</button>
               </div>
             </div>
@@ -526,7 +544,12 @@ function Dashboard({ session, onLogout }) {
                         </div>
                         <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{p.title}</div>
                         <div style={{ fontSize: 13, color: "#6B7280" }}>{p.description}</div>
-                        <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 6 }}>Reported on {p.date}</div>
+                        <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 6 }}>
+                          Reported on {p.date}
+                          {(p.suggestedName || p.suggestedTo) && (
+                            <span style={{ color: "#7C3AED", fontWeight: 600 }}> · Suggested: {p.suggestedName || getName(p.suggestedTo)}</span>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -551,15 +574,31 @@ function Dashboard({ session, onLogout }) {
                               <Badge text={p.category} color="#6B7280" />
                               <Badge text={p.priority} color={priorityColor(p.priority)} />
                               <Badge text={p.status} color={statusColor(p.status)} />
+                              {(p.suggestedName || p.suggestedTo) && (
+                                <Badge text={`For: ${p.suggestedName || getName(p.suggestedTo)}`} color="#7C3AED" />
+                              )}
                             </div>
                             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{p.title}</div>
                             <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>{p.description}</div>
-                            <div style={{ fontSize: 12, color: "#9CA3AF" }}>Reported by: {p.reportedBy} · {p.date}</div>
+                            <div style={{ fontSize: 12, color: "#9CA3AF" }}>
+                              Reported by: {p.reportedBy} · {p.date}
+                              {(p.suggestedName || p.suggestedTo) && (
+                                <span style={{ color: "#7C3AED", fontWeight: 600 }}> · {"\u{1F464}"} Suggested: {p.suggestedName || getName(p.suggestedTo)}</span>
+                              )}
+                            </div>
                           </div>
                           {p.status === "Open" && (
                             <button style={{ ...btnP, fontSize: 12, padding: "8px 16px", background: "#7C3AED", flexShrink: 0 }}
                               onClick={() => {
-                                setTaskForm(f => ({ ...f, title: `Resolve: ${p.title}`, description: p.description, linkedProblem: p.id, priority: p.priority }));
+                                setTaskForm(f => ({
+                                  ...f,
+                                  title: `Resolve: ${p.title}`,
+                                  description: p.description,
+                                  linkedProblem: p.id,
+                                  priority: p.priority,
+                                  assignedTo: p.suggestedTo || ""
+                                }));
+                                setPrefilledFrom(p.suggestedTo ? (p.suggestedName || getName(p.suggestedTo)) : "");
                                 setView("assign");
                               }}>
                               Assign Task {"\u{2192}"}
@@ -586,7 +625,7 @@ function Dashboard({ session, onLogout }) {
                   <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>All Tasks</h2>
                   <p style={{ margin: "6px 0 0", color: "#6B7280", fontSize: 14 }}>Monitor progress of every assigned task</p>
                 </div>
-                <button style={btnP} onClick={() => setView("assign")}>{"\u{2795}"} New Task</button>
+                <button style={btnP} onClick={() => { setPrefilledFrom(""); setView("assign"); }}>{"\u{2795}"} New Task</button>
               </div>
               {tasks.length === 0
                 ? <EmptyState icon={"\u{1F4CC}"} title="No tasks created yet" subtitle='Go to "Assign Task" to create one' />
@@ -624,6 +663,11 @@ function Dashboard({ session, onLogout }) {
                     {"\u{1F517}"} Linked to problem <strong>{taskForm.linkedProblem}</strong> — completing this task will auto-resolve the problem
                   </div>
                 )}
+                {prefilledFrom && (
+                  <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 8, padding: "10px 14px", marginBottom: 20, fontSize: 13, color: "#6D28D9" }}>
+                    {"\u{1F464}"} Reporter suggested <strong>{prefilledFrom}</strong> — already selected below. You can change it if someone else should handle it.
+                  </div>
+                )}
                 <div style={{ marginBottom: 18 }}>
                   <label style={lbl}>Task Title *</label>
                   <input style={inp} placeholder="e.g., Replace printer toner on 3rd floor" value={taskForm.title} onChange={e => setTaskForm(f => ({ ...f, title: e.target.value }))} />
@@ -654,7 +698,13 @@ function Dashboard({ session, onLogout }) {
                   </div>
                   <div style={{ flex: 1, minWidth: 160 }}>
                     <label style={lbl}>Link to Problem</label>
-                    <select style={inp} value={taskForm.linkedProblem} onChange={e => setTaskForm(f => ({ ...f, linkedProblem: e.target.value }))}>
+                    <select style={inp} value={taskForm.linkedProblem}
+                      onChange={e => {
+                        const pid = e.target.value;
+                        const linked = problems.find(p => p.id === pid);
+                        setTaskForm(f => ({ ...f, linkedProblem: pid, assignedTo: (linked && linked.suggestedTo) ? linked.suggestedTo : f.assignedTo }));
+                        setPrefilledFrom(linked && linked.suggestedTo ? (linked.suggestedName || getName(linked.suggestedTo)) : "");
+                      }}>
                       <option value="">{"\u{2014}"} None {"\u{2014}"}</option>
                       {problems.filter(p => p.status === "Open").map(p => <option key={p.id} value={p.id}>{p.id}: {p.title}</option>)}
                     </select>
@@ -662,7 +712,7 @@ function Dashboard({ session, onLogout }) {
                 </div>
                 <div style={{ display: "flex", gap: 12 }}>
                   <button style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitTask} disabled={saving}>Assign Task</button>
-                  <button style={btnS} onClick={() => setTaskForm({ title: "", description: "", assignedTo: "", priority: "Medium", dueDate: "", linkedProblem: "" })}>Clear</button>
+                  <button style={btnS} onClick={() => { setTaskForm({ title: "", description: "", assignedTo: "", priority: "Medium", dueDate: "", linkedProblem: "" }); setPrefilledFrom(""); }}>Clear</button>
                 </div>
               </div>
             </div>
