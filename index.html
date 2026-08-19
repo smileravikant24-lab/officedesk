@@ -18,8 +18,13 @@
     @keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
     @keyframes slideIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
     @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
+    @keyframes bar{0%{left:-40%}100%{left:100%}}
+    @keyframes spin{to{transform:rotate(360deg)}}
     .loading-dot{animation:pulse 1.4s ease-in-out infinite}
     .loading-dot:nth-child(2){animation-delay:.2s}.loading-dot:nth-child(3){animation-delay:.4s}
+    .topbar{position:fixed;top:0;left:0;right:0;height:3px;background:#E5E7EB;z-index:1000;overflow:hidden}
+    .topbar span{position:absolute;top:0;height:3px;width:40%;background:#2D5BFF;animation:bar 1s linear infinite}
+    .spin{display:inline-block;width:12px;height:12px;border:2px solid #C7D2FE;border-top-color:#2D5BFF;border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
     @media(max-width:768px){
       .app-layout{flex-direction:column!important}
       .sidebar{width:100%!important;border-right:none!important;border-bottom:1px solid #E5E7EB;padding:10px 0!important}
@@ -31,6 +36,7 @@
       .stat-row{flex-direction:column!important}
       .form-row{flex-direction:column!important}
       .header-inner{padding:0 14px!important}
+      .phone-grid{grid-template-columns:1fr!important}
     }
   </style>
 </head>
@@ -41,7 +47,7 @@
 const { useState, useEffect, useCallback, useRef } = React;
 
 // ╔══════════════════════════════════════════════════════════════╗
-// ║  CONFIGURATION — Replace these two values after setup       ║
+// ║  CONFIGURATION                                              ║
 // ╚══════════════════════════════════════════════════════════════╝
 const CONFIG = {
   GOOGLE_CLIENT_ID: '768240328001-153jkt92ph1ai4adgk69hdeg8amchtj5.apps.googleusercontent.com',
@@ -49,12 +55,18 @@ const CONFIG = {
 };
 
 // ──────────── CONSTANTS ────────────
-// Add or remove a line here and it changes everywhere in the app.
 const CATEGORIES = ["General Issue", "IT / Computer", "Maintenance", "Follow-up", "Other"];
 const TYPES = ["Issue", "Task", "Request", "Complaint"];
 
 const typeColor = (t) => ({ Issue: "#EF4444", Task: "#2563EB", Request: "#0891B2", Complaint: "#F59E0B" }[t] || "#6B7280");
 const statusColor = (s) => ({ Open: "#8B5CF6", Assigned: "#2563EB", "In Progress": "#F59E0B", Resolved: "#10B981", Closed: "#6B7280", Pending: "#8B5CF6", Completed: "#10B981" }[s] || "#6B7280");
+
+// Turn "98765 43210" / "+91-98765-43210" into a dialable string
+const cleanPhone = (p) => String(p || "").replace(/[^\d+]/g, "");
+const waNumber = (p) => {
+  const d = cleanPhone(p).replace(/^\+/, "");
+  return d.length === 10 ? "91" + d : d;
+};
 
 // ──────────── API HELPER ────────────
 async function api(action, data = {}) {
@@ -64,7 +76,14 @@ async function api(action, data = {}) {
     body: JSON.stringify({ action, ...data }),
     redirect: 'follow'
   });
-  return resp.json();
+  if (!resp.ok) throw new Error('Server replied ' + resp.status);
+  const text = await resp.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Apps Script returns an HTML error page when the deployment is stale
+    throw new Error('Bad response from server — redeploy the Apps Script as a NEW version.');
+  }
 }
 
 // ──────────── SMALL COMPONENTS ────────────
@@ -108,6 +127,45 @@ function LoadingSpinner({ text = "Loading..." }) {
         <div className="loading-dot" style={{ width: 10, height: 10, borderRadius: "50%", background: "#2D5BFF" }} />
       </div>
       <div style={{ fontSize: 14, color: "#6B7280", fontWeight: 500 }}>{text}</div>
+    </div>
+  );
+}
+
+function ErrorPanel({ message, onRetry, busy }) {
+  return (
+    <div style={{ background: "#fff", border: "1px solid #FECACA", borderRadius: 12, padding: 24, maxWidth: 620 }}>
+      <div style={{ fontWeight: 700, fontSize: 15, color: "#DC2626", marginBottom: 6 }}>Couldn't load data</div>
+      <div style={{ fontSize: 13, color: "#6B7280", lineHeight: 1.6, marginBottom: 16 }}>{message}</div>
+      <button onClick={onRetry} disabled={busy}
+        style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: "#2D5BFF", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>
+        {busy ? <span><span className="spin" /> Retrying…</span> : "Try again"}
+      </button>
+    </div>
+  );
+}
+
+// ──────────── PHONE CARD ────────────
+function PhoneCard({ emp, isSelf }) {
+  const phone = cleanPhone(emp.phone);
+  const btn = { flex: 1, padding: "9px 12px", borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: "none", textAlign: "center", display: "block" };
+  return (
+    <div style={{ background: "#fff", borderRadius: 12, border: `1px solid ${isSelf ? "#C7D2FE" : "#E5E7EB"}`, padding: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+        <Avatar initials={emp.avatar} size={44} color={emp.role === "EA" ? "#7C3AED" : "#2D5BFF"} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>{emp.name}{isSelf && <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 500 }}> · you</span>}</div>
+          <div style={{ fontSize: 12, color: "#9CA3AF" }}>{emp.dept} · {emp.role}</div>
+          <div style={{ fontSize: 12.5, color: "#374151", marginTop: 3, fontFamily: "monospace" }}>{emp.phone || "No number saved"}</div>
+        </div>
+      </div>
+      {phone ? (
+        <div style={{ display: "flex", gap: 8 }}>
+          <a href={`tel:${phone}`} style={{ ...btn, background: "#EEF2FF", color: "#2D5BFF" }}>{"\u{1F4DE}"} Call</a>
+          <a href={`https://wa.me/${waNumber(emp.phone)}`} target="_blank" rel="noreferrer" style={{ ...btn, background: "#DCFCE7", color: "#15803D" }}>{"\u{1F4AC}"} WhatsApp</a>
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: "#9CA3AF" }}>Add a number in the Employees sheet (column G) to enable calling.</div>
+      )}
     </div>
   );
 }
@@ -158,7 +216,7 @@ function LoginScreen({ onLogin }) {
         setError(result.error || 'Login failed. Your email is not authorized.');
       }
     } catch (err) {
-      setError('Connection error. Please check your internet and try again.');
+      setError(err.message || 'Connection error. Check your internet and try again.');
     }
     setChecking(false);
   };
@@ -206,7 +264,9 @@ function Dashboard({ session, onLogout }) {
   const [problems, setProblems] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [employees, setEmployees] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);      // first load only
+  const [refreshing, setRefreshing] = useState(false); // every reload after that
+  const [loadError, setLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [notification, setNotification] = useState(null);
   const [problemForm, setProblemForm] = useState({ title: "", category: "General Issue", type: "Issue", description: "", suggestedTo: "" });
@@ -218,23 +278,26 @@ function Dashboard({ session, onLogout }) {
 
   const notify = (msg, isError = false) => {
     setNotification({ msg, isError });
-    setTimeout(() => setNotification(null), 3500);
+    setTimeout(() => setNotification(null), 4000);
   };
 
-  // ── Load data ──
+  // ── Load data ── (never shows a toast; failures go to loadError)
   const refreshData = useCallback(async () => {
+    setRefreshing(true);
     try {
       const result = await api('getAllData', { email: session.email });
       if (result.success) {
         setProblems(result.problems || []);
         setTasks(result.tasks || []);
         setEmployees(result.employees || []);
+        setLoadError(null);
       } else {
-        notify(result.error || 'Failed to load data', true);
+        setLoadError(result.error || 'The server returned no data.');
       }
     } catch (err) {
-      notify('Connection error', true);
+      setLoadError(err.message || 'Connection error. Check your internet.');
     }
+    setRefreshing(false);
     setLoading(false);
   }, [session.email]);
 
@@ -244,16 +307,22 @@ function Dashboard({ session, onLogout }) {
   const submitProblem = async () => {
     if (!problemForm.title.trim()) { notify("Please enter a title", true); return; }
     setSaving(true);
+    let saved = false;
     try {
       const result = await api('addProblem', { email: session.email, ...problemForm });
       if (result.success) {
-        notify("Entry registered successfully!");
+        saved = true;
         setProblemForm({ title: "", category: "General Issue", type: "Issue", description: "", suggestedTo: "" });
-        await refreshData();
-        setView("myproblems");
       } else { notify(result.error, true); }
-    } catch { notify("Failed to submit", true); }
+    } catch (err) { notify(err.message || "Failed to submit", true); }
     setSaving(false);
+
+    // Refresh AFTER saving — a refresh problem must not look like a save failure
+    if (saved) {
+      await refreshData();
+      notify("Saved successfully!");
+      setView("myproblems");
+    }
   };
 
   // ── Submit Task ──
@@ -261,30 +330,35 @@ function Dashboard({ session, onLogout }) {
     if (!taskForm.title.trim()) { notify("Please enter a task title", true); return; }
     if (!taskForm.assignedTo) { notify("Please select an employee", true); return; }
     setSaving(true);
+    let assignedName = "";
     try {
       const result = await api('addTask', { email: session.email, ...taskForm });
       if (result.success) {
-        notify("Task assigned to " + (result.task?.assigneeName || "employee") + "!");
+        assignedName = result.task?.assigneeName || "employee";
         setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
         setPrefilledFrom("");
-        await refreshData();
-        setView("tasks");
       } else { notify(result.error, true); }
-    } catch { notify("Failed to assign", true); }
+    } catch (err) { notify(err.message || "Failed to assign", true); }
     setSaving(false);
+
+    if (assignedName) {
+      await refreshData();
+      notify("Task assigned to " + assignedName + "!");
+      setView("tasks");
+    }
   };
 
   // ── Update Task Status ──
   const updateTaskStatus = async (taskId, newStatus) => {
     setSaving(true);
+    let ok = false;
     try {
       const result = await api('updateTaskStatus', { email: session.email, taskId, newStatus });
-      if (result.success) {
-        notify("Task updated to " + newStatus);
-        await refreshData();
-      } else { notify(result.error, true); }
-    } catch { notify("Failed to update", true); }
+      if (result.success) ok = true;
+      else notify(result.error, true);
+    } catch (err) { notify(err.message || "Failed to update", true); }
     setSaving(false);
+    if (ok) { await refreshData(); notify("Task updated to " + newStatus); }
   };
 
   const handleLogout = () => {
@@ -298,8 +372,8 @@ function Dashboard({ session, onLogout }) {
   const myProblems = problems;
 
   const navItems = isEA
-    ? [{ key: "dashboard", label: "Dashboard", icon: "\u{1F4CA}" }, { key: "problems", label: "Entries", icon: "\u{1F4CB}" }, { key: "tasks", label: "All Tasks", icon: "\u{1F4CC}" }, { key: "assign", label: "Assign Task", icon: "\u{2795}" }]
-    : [{ key: "dashboard", label: "Dashboard", icon: "\u{1F4CA}" }, { key: "report", label: "Report Problem", icon: "\u{1F6A8}" }, { key: "mytasks", label: "My Tasks", icon: "\u{2705}" }, { key: "myproblems", label: "My Entries", icon: "\u{1F4DD}" }];
+    ? [{ key: "dashboard", label: "Dashboard", icon: "\u{1F4CA}" }, { key: "problems", label: "Entries", icon: "\u{1F4CB}" }, { key: "tasks", label: "All Tasks", icon: "\u{1F4CC}" }, { key: "assign", label: "Assign Task", icon: "\u{2795}" }, { key: "team", label: "Contacts", icon: "\u{1F4DE}" }]
+    : [{ key: "dashboard", label: "Dashboard", icon: "\u{1F4CA}" }, { key: "report", label: "Report Problem", icon: "\u{1F6A8}" }, { key: "mytasks", label: "My Tasks", icon: "\u{2705}" }, { key: "myproblems", label: "My Entries", icon: "\u{1F4DD}" }, { key: "team", label: "Contacts", icon: "\u{1F4DE}" }];
 
   const inp = { width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #D1D5DB", fontSize: 14, outline: "none", fontFamily: "inherit", boxSizing: "border-box", background: "#FAFBFC" };
   const lbl = { display: "block", marginBottom: 4, fontSize: 12, fontWeight: 600, color: "#374151", letterSpacing: 0.3 };
@@ -313,11 +387,13 @@ function Dashboard({ session, onLogout }) {
     return emp ? emp.name : (email || "Unknown");
   };
 
-  // Employees a reporter can suggest (everyone except the EA and themselves)
   const suggestableEmployees = employees.filter(e => e.role !== "EA" && e.email !== session.email);
 
   return (
     <div style={{ minHeight: "100vh" }}>
+
+      {/* Top loading bar — visible on every refresh */}
+      {refreshing && <div className="topbar"><span /></div>}
 
       {/* Notification */}
       {notification && (
@@ -346,7 +422,9 @@ function Dashboard({ session, onLogout }) {
           <div style={{ width: 36, height: 36, borderRadius: 8, background: "linear-gradient(135deg, #2D5BFF, #7C3AED)", display: "none", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 16 }}>O</div>
           <div>
             <div style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.2 }}>OfficeDesk</div>
-            <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500 }}>Task & Problem Management</div>
+            <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500 }}>
+              {refreshing ? <span><span className="spin" /> Refreshing…</span> : "Task & Problem Management"}
+            </div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -387,14 +465,21 @@ function Dashboard({ session, onLogout }) {
             ))}
           </div>
           <div style={{ padding: "12px 16px", marginTop: 12, borderTop: "1px solid #F3F4F6" }}>
-            <button onClick={refreshData} style={{ ...btnS, width: "100%", fontSize: 12, padding: "8px 12px" }}>
-              {"\u{1F504}"} Refresh Data
+            <button onClick={refreshData} disabled={refreshing}
+              style={{ ...btnS, width: "100%", fontSize: 12, padding: "8px 12px", opacity: refreshing ? 0.65 : 1, cursor: refreshing ? "default" : "pointer" }}>
+              {refreshing ? <span><span className="spin" /> Refreshing…</span> : <span>{"\u{1F504}"} Refresh Data</span>}
             </button>
           </div>
         </nav>
 
         {/* Main Content */}
         <main className="main-content" style={{ flex: 1, padding: 28, overflowY: "auto", maxHeight: "calc(100vh - 64px)" }}>
+
+          {loadError && (
+            <div style={{ marginBottom: 24 }}>
+              <ErrorPanel message={loadError} onRetry={refreshData} busy={refreshing} />
+            </div>
+          )}
 
           {/* ═══ DASHBOARD ═══ */}
           {view === "dashboard" && (
@@ -411,19 +496,19 @@ function Dashboard({ session, onLogout }) {
 
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", overflow: "hidden" }}>
                 <div style={{ padding: "16px 20px", borderBottom: "1px solid #F3F4F6", fontWeight: 700, fontSize: 15 }}>Recent Activity</div>
-                {[...myProblems.slice(0, 4).map(p => ({ type: "problem", data: p, date: p.date })),
-                  ...myTasks.slice(0, 4).map(t => ({ type: "task", data: t, date: t.createdDate }))]
+                {[...myProblems.slice(0, 4).map(p => ({ kind: "problem", data: p, date: p.date })),
+                  ...myTasks.slice(0, 4).map(t => ({ kind: "task", data: t, date: t.createdDate }))]
                   .sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 6)
                   .map((item, i) => (
-                    <div key={i} style={{ padding: "14px 20px", borderBottom: "1px solid #F9FAFB", display: "flex", alignItems: "center", gap: 14 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: item.type === "problem" ? "#8B5CF6" : "#2D5BFF", flexShrink: 0 }} />
+                    <div key={i} style={{ padding: "14px 20px", borderBottom: "1px solid #F9FAFB", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: item.kind === "problem" ? "#8B5CF6" : "#2D5BFF", flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           <span style={{ color: "#9CA3AF", marginRight: 8, fontFamily: "monospace", fontSize: 12 }}>{item.data.id}</span>
                           {item.data.title}
                         </div>
                         <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>
-                          {item.type === "problem" ? `Reported by ${item.data.reportedBy}` : `Assigned to ${item.data.assigneeName || item.data.assignedTo}`} · {item.date}
+                          {item.kind === "problem" ? `Reported by ${item.data.reportedBy}` : `Assigned to ${item.data.assigneeName || item.data.assignedTo}`} · {item.date}
                         </div>
                       </div>
                       <Badge text={item.data.status} color={statusColor(item.data.status)} />
@@ -436,11 +521,25 @@ function Dashboard({ session, onLogout }) {
               </div>
 
               {!isEA && (
-                <div style={{ marginTop: 24, display: "flex", gap: 12 }}>
+                <div style={{ marginTop: 24, display: "flex", gap: 12, flexWrap: "wrap" }}>
                   <button style={btnP} onClick={() => setView("report")}>{"\u{1F6A8}"} Report a Problem</button>
                   <button style={btnS} onClick={() => setView("mytasks")}>{"\u{2705}"} View My Tasks</button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ═══ CONTACTS / PHONE CARDS ═══ */}
+          {view === "team" && (
+            <div style={{ animation: "slideIn 0.3s" }}>
+              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>Contacts</h2>
+              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Tap Call or WhatsApp to reach anyone directly from your phone</p>
+              {employees.length === 0
+                ? <EmptyState icon={"\u{1F4DE}"} title="No contacts loaded" />
+                : <div className="phone-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
+                    {employees.map(e => <PhoneCard key={e.id || e.email} emp={e} isSelf={e.email === session.email} />)}
+                  </div>
+              }
             </div>
           )}
 
@@ -472,8 +571,6 @@ function Dashboard({ session, onLogout }) {
                   <label style={lbl}>Description</label>
                   <textarea style={{ ...inp, minHeight: 100, resize: "vertical" }} placeholder="Describe it in detail..." value={problemForm.description} onChange={e => setProblemForm(f => ({ ...f, description: e.target.value }))} />
                 </div>
-
-                {/* ── Suggest who should handle this ── */}
                 <div style={{ marginBottom: 24 }}>
                   <label style={lbl}>{"\u{1F464}"} Suggest Person (optional)</label>
                   <select style={inp} value={problemForm.suggestedTo} onChange={e => setProblemForm(f => ({ ...f, suggestedTo: e.target.value }))}>
@@ -484,7 +581,6 @@ function Dashboard({ session, onLogout }) {
                     अगर ये काम किसी particular person का है तो यहाँ नाम चुनें — EA को entry के साथ ये suggestion दिखेगा.
                   </div>
                 </div>
-
                 <button style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitProblem} disabled={saving}>Submit</button>
               </div>
             </div>
@@ -539,7 +635,7 @@ function Dashboard({ session, onLogout }) {
                       <div key={p.id} style={{ background: "#fff", borderRadius: 12, border: `1px solid ${p.status === "Resolved" ? "#D1FAE5" : "#E5E7EB"}`, padding: 20 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
                           <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{p.id}</span>
-                          <Badge text={p.category} color="#6B7280" />
+                          {p.category && <Badge text={p.category} color="#6B7280" />}
                           {p.type && <Badge text={p.type} color={typeColor(p.type)} />}
                           <Badge text={p.status} color={statusColor(p.status)} />
                         </div>
@@ -572,7 +668,7 @@ function Dashboard({ session, onLogout }) {
                           <div style={{ flex: 1, minWidth: 200 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
                               <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{p.id}</span>
-                              <Badge text={p.category} color="#6B7280" />
+                              {p.category && <Badge text={p.category} color="#6B7280" />}
                               {p.type && <Badge text={p.type} color={typeColor(p.type)} />}
                               <Badge text={p.status} color={statusColor(p.status)} />
                               {(p.suggestedName || p.suggestedTo) && (
@@ -738,7 +834,6 @@ function App() {
       const stored = sessionStorage.getItem('officedesk_session');
       if (stored) {
         const parsed = JSON.parse(stored);
-        // Session expires after 8 hours
         if (Date.now() - parsed.loginTime < 8 * 60 * 60 * 1000) return parsed;
         sessionStorage.removeItem('officedesk_session');
       }
