@@ -477,7 +477,8 @@ function Dashboard({ session, onLogout }) {
     return emp ? emp.name : (email || "Unknown");
   };
 
-  const suggestableEmployees = employees.filter(e => e.role !== "EA" && e.email !== session.email);
+  // Everyone in the Employees sheet except yourself — EA and Owner included
+  const suggestableEmployees = employees.filter(e => e.email !== session.email);
 
   return (
     <div style={{ minHeight: "100vh" }}>
