@@ -82,7 +82,7 @@ const TYPES = ["Issue", "Task", "Request", "Complaint"];
 const typeColor = (t) => ({ Issue: "#EF4444", Task: "#2563EB", Request: "#0891B2", Complaint: "#F59E0B" }[t] || "#6B7280");
 const statusColor = (s) => ({
   Open: "#8B5CF6", Assigned: "#2563EB", Pending: "#8B5CF6", Accepted: "#0891B2",
-  "In Progress": "#F59E0B", Declined: "#EF4444", Resolved: "#10B981",
+  "In Progress": "#F59E0B", Resolved: "#10B981",
   Completed: "#10B981", Closed: "#6B7280"
 }[s] || "#6B7280");
 
@@ -210,23 +210,18 @@ function PhoneCard({ emp, isSelf }) {
   );
 }
 
-// ──────────── RESPONSE STRIP (shown on task cards) ────────────
+// ──────────── ACCEPTANCE STRIP (shown on task cards) ────────────
 function ResponseInfo({ t, forEA }) {
   if (!t.response) return null;
-  const declined = t.response === "Declined";
   return (
     <div style={{
       marginTop: 10, padding: "10px 12px", borderRadius: 9,
-      background: declined ? "#FEF2F2" : "#ECFEFF",
-      border: `1px solid ${declined ? "#FECACA" : "#A5F3FC"}`,
-      fontSize: 12.5, color: declined ? "#B91C1C" : "#0E7490", lineHeight: 1.6
+      background: "#ECFEFF", border: "1px solid #A5F3FC",
+      fontSize: 12.5, color: "#0E7490", lineHeight: 1.6
     }}>
-      {declined
-        ? <div><strong>{forEA ? (t.assigneeName || t.assignedTo) + " can't do this" : "You declined this task"}</strong>{t.responseNote && <div style={{ marginTop: 3 }}>Reason: {t.responseNote}</div>}</div>
-        : <div><strong>{forEA ? (t.assigneeName || t.assignedTo) + " accepted" : "You accepted this task"}</strong>
-            <div style={{ marginTop: 3 }}>Will complete by <strong>{t.promisedDate || "—"}</strong></div>
-            {t.responseNote && <div style={{ marginTop: 3 }}>Note: {t.responseNote}</div>}
-          </div>}
+      <strong>{forEA ? (t.assigneeName || t.assignedTo) + " accepted" : "You accepted this task"}</strong>
+      <div style={{ marginTop: 3 }}>Will complete by <strong>{t.promisedDate || "—"}</strong></div>
+      {t.responseNote && <div style={{ marginTop: 3 }}>Note: {t.responseNote}</div>}
       {t.respondedOn && <div style={{ marginTop: 3, opacity: 0.75 }}>Responded on {t.respondedOn}</div>}
     </div>
   );
@@ -329,8 +324,10 @@ function Dashboard({ session, onLogout }) {
   const [problemForm, setProblemForm] = useState({ title: "", category: "General Issue", type: "Issue", description: "", suggestedTo: "" });
   const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
   const [prefilledFrom, setPrefilledFrom] = useState("");
-  const [respond, setRespond] = useState(null); // { task, mode: 'accept' | 'decline' }
+  const [respond, setRespond] = useState(null);       // task being accepted
   const [respForm, setRespForm] = useState({ promisedDate: "", note: "" });
+  const [changing, setChanging] = useState(null);     // task whose person the EA is changing
+  const [newAssignee, setNewAssignee] = useState("");
 
   const user = session.employee;
   const isEA = user.role === 'EA';
@@ -398,36 +395,55 @@ function Dashboard({ session, onLogout }) {
     if (assignedName) { await refreshData(); notify("Task assigned to " + assignedName + "!"); setView("tasks"); }
   };
 
-  // ── Accept / Decline a task ──
-  const openRespond = (task, mode) => {
+  // ── Accept a task (with a promised date) ──
+  const openRespond = (task) => {
     setRespForm({ promisedDate: "", note: "" });
-    setRespond({ task, mode });
+    setRespond(task);
   };
 
   const submitResponse = async () => {
     if (!respond) return;
-    const accepting = respond.mode === 'accept';
-    if (accepting && !respForm.promisedDate) { notify("Please choose the date you'll finish by", true); return; }
-    if (!accepting && !respForm.note.trim()) { notify("Please write why you can't do it", true); return; }
+    if (!respForm.promisedDate) { notify("Please choose the date you'll finish by", true); return; }
 
-    const taskId = respond.task.id;
+    const taskId = respond.id;
     setRespond(null);
     setSaving(true);
     let ok = false;
     try {
       const result = await api('respondToTask', {
         email: session.email, taskId,
-        response: accepting ? 'Accepted' : 'Declined',
         note: respForm.note, promisedDate: respForm.promisedDate
       });
       if (result.success) ok = true; else notify(result.error, true);
     } catch (err) { notify(err.message || "Failed to send response", true); }
     setSaving(false);
 
-    if (ok) {
-      await refreshData();
-      notify(accepting ? "Accepted — EA has been informed" : "Sent to EA — task marked as declined");
-    }
+    if (ok) { await refreshData(); notify("Accepted — EA has been informed"); }
+  };
+
+  // ── EA changes the assigned person ──
+  const openChange = (task) => {
+    setNewAssignee(task.assignedTo || "");
+    setChanging(task);
+  };
+
+  const submitChange = async () => {
+    if (!changing) return;
+    if (!newAssignee) { notify("Please select a person", true); return; }
+    if (newAssignee === changing.assignedTo) { notify("That's the same person", true); return; }
+
+    const taskId = changing.id;
+    setChanging(null);
+    setSaving(true);
+    let name = "";
+    try {
+      const result = await api('reassignTask', { email: session.email, taskId, assignedTo: newAssignee });
+      if (result.success) name = result.assigneeName || "the new person";
+      else notify(result.error, true);
+    } catch (err) { notify(err.message || "Failed to change person", true); }
+    setSaving(false);
+
+    if (name) { await refreshData(); notify("Task moved to " + name); }
   };
 
   // ── Update Task Status ──
@@ -449,7 +465,6 @@ function Dashboard({ session, onLogout }) {
   };
 
   const openProblems = problems.filter(p => p.status === "Open");
-  const declinedTasks = tasks.filter(t => t.response === "Declined");
   const myTasks = tasks;
   const myProblems = problems;
 
@@ -501,41 +516,45 @@ function Dashboard({ session, onLogout }) {
         </div>
       )}
 
-      {/* Accept / Decline sheet */}
+      {/* Accept sheet */}
       {respond && (
-        <Sheet
-          title={respond.mode === 'accept' ? "Accept task" : "Can't do this task"}
-          onClose={() => setRespond(null)}>
+        <Sheet title="Accept task" onClose={() => setRespond(null)}>
           <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 16, lineHeight: 1.55 }}>
-            <strong style={{ color: "#1A1D23" }}>{respond.task.title}</strong>
+            <strong style={{ color: "#1A1D23" }}>{respond.title}</strong>
           </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={lbl}>I will complete it by *</label>
+            <input type="date" style={inp} value={respForm.promisedDate}
+              onChange={e => setRespForm(f => ({ ...f, promisedDate: e.target.value }))} />
+            {respond.dueDate && <div style={{ fontSize: 11.5, color: "#9CA3AF", marginTop: 5 }}>EA's due date: {respond.dueDate}</div>}
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <label style={lbl}>Note for EA (optional)</label>
+            <textarea style={{ ...inp, minHeight: 76, resize: "vertical" }} placeholder="e.g., will start after the dispatch rush"
+              value={respForm.note} onChange={e => setRespForm(f => ({ ...f, note: e.target.value }))} />
+          </div>
+          <button style={{ ...btnP, width: "100%", background: "#0891B2" }} onClick={submitResponse}>{"\u2713"} Accept & send date</button>
+        </Sheet>
+      )}
 
-          {respond.mode === 'accept' ? (
-            <>
-              <div style={{ marginBottom: 16 }}>
-                <label style={lbl}>I will complete it by *</label>
-                <input type="date" style={inp} value={respForm.promisedDate}
-                  onChange={e => setRespForm(f => ({ ...f, promisedDate: e.target.value }))} />
-                {respond.task.dueDate && <div style={{ fontSize: 11.5, color: "#9CA3AF", marginTop: 5 }}>EA's due date: {respond.task.dueDate}</div>}
-              </div>
-              <div style={{ marginBottom: 20 }}>
-                <label style={lbl}>Note for EA (optional)</label>
-                <textarea style={{ ...inp, minHeight: 76, resize: "vertical" }} placeholder="e.g., will start after the dispatch rush"
-                  value={respForm.note} onChange={e => setRespForm(f => ({ ...f, note: e.target.value }))} />
-              </div>
-              <button style={{ ...btnP, width: "100%", background: "#0891B2" }} onClick={submitResponse}>{"\u2713"} Accept & send date</button>
-            </>
-          ) : (
-            <>
-              <div style={{ marginBottom: 20 }}>
-                <label style={lbl}>Reason *</label>
-                <textarea style={{ ...inp, minHeight: 96, resize: "vertical" }} placeholder="e.g., ye mera department ka kaam nahi hai / abhi site par hoon"
-                  value={respForm.note} onChange={e => setRespForm(f => ({ ...f, note: e.target.value }))} />
-                <div style={{ fontSize: 11.5, color: "#9CA3AF", marginTop: 5 }}>EA को यही reason दिखेगा और entry दोबारा Open हो जाएगी.</div>
-              </div>
-              <button style={{ ...btnP, width: "100%", background: "#EF4444" }} onClick={submitResponse}>{"\u2718"} Send to EA</button>
-            </>
-          )}
+      {/* EA: change person sheet */}
+      {changing && (
+        <Sheet title="Change assigned person" onClose={() => setChanging(null)}>
+          <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 16, lineHeight: 1.55 }}>
+            <strong style={{ color: "#1A1D23" }}>{changing.title}</strong>
+            <div style={{ marginTop: 4 }}>Currently with {changing.assigneeName || changing.assignedTo}</div>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={lbl}>New person *</label>
+            <select style={inp} value={newAssignee} onChange={e => setNewAssignee(e.target.value)}>
+              <option value="">-- Select Employee --</option>
+              {employees.filter(e => e.role !== "EA").map(e => <option key={e.email} value={e.email}>{e.name} — {e.dept}</option>)}
+            </select>
+          </div>
+          <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 9, padding: "10px 13px", marginBottom: 20, fontSize: 12.5, color: "#92400E", lineHeight: 1.55 }}>
+            Task वापस <strong>Pending</strong> हो जाएगा और नया व्यक्ति अपनी date देकर accept करेगा.
+          </div>
+          <button style={{ ...btnP, width: "100%", background: "#7C3AED" }} onClick={submitChange}>Move task to this person</button>
         </Sheet>
       )}
 
@@ -619,20 +638,8 @@ function Dashboard({ session, onLogout }) {
                 <StatCard label={isEA ? "Open Entries" : "My Entries"} value={isEA ? openProblems.length : myProblems.length} color="#8B5CF6" icon={"\u{1F514}"} />
                 <StatCard label={isEA ? "Total Tasks" : "My Tasks"} value={myTasks.length} color="#2D5BFF" icon={"\u{1F4CC}"} />
                 <StatCard label="In Progress" value={myTasks.filter(t => t.status === "In Progress").length} color="#F59E0B" icon={"\u{23F3}"} />
-                <StatCard label={isEA ? "Declined" : "Completed"} value={isEA ? declinedTasks.length : myTasks.filter(t => t.status === "Completed").length} color={isEA ? "#EF4444" : "#10B981"} icon={isEA ? "\u{26A0}" : "\u{2705}"} />
+                <StatCard label="Completed" value={myTasks.filter(t => t.status === "Completed").length} color="#10B981" icon={"\u{2705}"} />
               </div>
-
-              {isEA && declinedTasks.length > 0 && (
-                <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 12, padding: 16, marginBottom: 22 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "#B91C1C", marginBottom: 8 }}>{"\u{26A0}"} {declinedTasks.length} task(s) declined — need reassigning</div>
-                  {declinedTasks.slice(0, 3).map(t => (
-                    <div key={t.id} style={{ fontSize: 12.5, color: "#7F1D1D", marginTop: 5, lineHeight: 1.5 }}>
-                      <strong>{t.id}</strong> {t.title} — {t.assigneeName || t.assignedTo}: {t.responseNote}
-                    </div>
-                  ))}
-                  <button style={{ ...btnS, marginTop: 12, fontSize: 13, padding: "9px 16px" }} onClick={() => setView("tasks")}>View all tasks</button>
-                </div>
-              )}
 
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", overflow: "hidden" }}>
                 <div style={{ padding: "14px 18px", borderBottom: "1px solid #F3F4F6", fontWeight: 700, fontSize: 14.5 }}>Recent Activity</div>
@@ -732,12 +739,12 @@ function Dashboard({ session, onLogout }) {
           {view === "mytasks" && !isEA && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>My Tasks</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Accept with a date, or tell the EA you can't do it</p>
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Accept each task with the date you'll finish it by</p>
               {myTasks.length === 0
                 ? <EmptyState icon={"\u{1F4ED}"} title="No tasks assigned yet" subtitle="Tasks assigned by the EA will appear here" />
                 : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     {myTasks.map(t => (
-                      <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : t.status === "Declined" ? "#FECACA" : "#E5E7EB"}`, padding: 18 }}>
+                      <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : "#E5E7EB"}`, padding: 18 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
                           <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
                           {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
@@ -755,10 +762,7 @@ function Dashboard({ session, onLogout }) {
                         {/* Actions */}
                         <div className="act-row" style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
                           {t.status === "Pending" && (
-                            <>
-                              <button className="act" style={{ ...btnP, background: "#0891B2", fontSize: 13.5, padding: "11px 16px" }} onClick={() => openRespond(t, 'accept')}>{"\u2713"} I'll do it</button>
-                              <button className="act" style={{ ...btnS, color: "#B91C1C", background: "#FEF2F2", fontSize: 13.5, padding: "11px 16px" }} onClick={() => openRespond(t, 'decline')}>{"\u2718"} Can't do this</button>
-                            </>
+                            <button className="act" style={{ ...btnP, background: "#0891B2", fontSize: 13.5, padding: "11px 16px" }} onClick={() => openRespond(t)}>{"\u2713"} I'll do it — give date</button>
                           )}
                           {t.status === "Accepted" && (
                             <button className="act" style={{ ...btnP, fontSize: 13.5, padding: "11px 16px" }} onClick={() => updateTaskStatus(t.id, "In Progress")}>{"\u{25B6}"} Start Task</button>
@@ -767,9 +771,6 @@ function Dashboard({ session, onLogout }) {
                             <button className="act" style={{ ...btnP, background: "#10B981", fontSize: 13.5, padding: "11px 16px" }} onClick={() => updateTaskStatus(t.id, "Completed")}>{"\u2713"} Mark Done</button>
                           )}
                           {t.status === "Completed" && <span style={{ fontSize: 13, color: "#10B981", fontWeight: 600 }}>{"\u{2705}"} Completed</span>}
-                          {t.status === "Declined" && (
-                            <button className="act" style={{ ...btnS, fontSize: 13.5, padding: "11px 16px" }} onClick={() => openRespond(t, 'accept')}>Changed my mind — accept</button>
-                          )}
                         </div>
                       </div>
                     ))}
@@ -862,7 +863,7 @@ function Dashboard({ session, onLogout }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 21, fontWeight: 700 }}>All Tasks</h2>
-                  <p style={{ margin: "5px 0 0", color: "#6B7280", fontSize: 13.5 }}>Who accepted, who declined, and by when</p>
+                  <p style={{ margin: "5px 0 0", color: "#6B7280", fontSize: 13.5 }}>Who accepted, by when — and change the person any time</p>
                 </div>
                 <button className="act" style={btnP} onClick={() => { setPrefilledFrom(""); setView("assign"); }}>{"\u{2795}"} New Task</button>
               </div>
@@ -870,7 +871,7 @@ function Dashboard({ session, onLogout }) {
                 ? <EmptyState icon={"\u{1F4CC}"} title="No tasks created yet" subtitle='Use "Assign" to create one' />
                 : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     {tasks.map(t => (
-                      <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : t.status === "Declined" ? "#FECACA" : "#E5E7EB"}`, padding: 18 }}>
+                      <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : "#E5E7EB"}`, padding: 18 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
                           <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
                           {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
@@ -888,21 +889,16 @@ function Dashboard({ session, onLogout }) {
                         <ResponseInfo t={t} forEA={true} />
 
                         {!t.response && t.status === "Pending" && (
-                          <div style={{ marginTop: 10, fontSize: 12.5, color: "#9CA3AF" }}>{"\u{23F3}"} Waiting for {t.assigneeName || t.assignedTo} to respond</div>
+                          <div style={{ marginTop: 10, fontSize: 12.5, color: "#9CA3AF" }}>{"\u{23F3}"} Waiting for {t.assigneeName || t.assignedTo} to accept</div>
                         )}
-                        {t.status === "Declined" && (
-                          <button className="act" style={{ ...btnP, background: "#7C3AED", fontSize: 13.5, padding: "11px 16px", marginTop: 12 }}
-                            onClick={() => {
-                              setTaskForm(f => ({
-                                ...f, title: t.title, description: t.description,
-                                linkedProblem: t.linkedProblem || "", type: TYPES.includes(t.type) ? t.type : "Task",
-                                assignedTo: "", dueDate: t.dueDate || ""
-                              }));
-                              setPrefilledFrom("");
-                              setView("assign");
-                            }}>
-                            Reassign to someone else {"\u{2192}"}
-                          </button>
+
+                        {t.status !== "Completed" && (
+                          <div className="act-row" style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                            <button className="act" style={{ ...btnS, color: "#6D28D9", background: "#F5F3FF", fontSize: 13.5, padding: "11px 16px" }}
+                              onClick={() => openChange(t)}>
+                              {"\u{1F464}"} Change person
+                            </button>
+                          </div>
                         )}
                       </div>
                     ))}
@@ -915,7 +911,7 @@ function Dashboard({ session, onLogout }) {
           {view === "assign" && isEA && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>Assign New Task</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>The employee will accept with a date, or tell you they can't</p>
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>The employee accepts it with the date they'll finish by</p>
               <div className="card" style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 24, maxWidth: 600 }}>
                 {taskForm.linkedProblem && (
                   <div style={{ background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 9, padding: "10px 13px", marginBottom: 16, fontSize: 12.5, color: "#4338CA", lineHeight: 1.55 }}>
