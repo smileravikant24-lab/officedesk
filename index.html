@@ -1,851 +1,444 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OfficeDesk — Task & Problem Management</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'><rect width='36' height='36' rx='8' fill='%232D5BFF'/><text x='18' y='24' text-anchor='middle' fill='white' font-size='20' font-weight='bold'>O</text></svg>" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
-  <style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;background:#F3F4F8;color:#1A1D23}
-    select,input,textarea,button{font-family:inherit}
-    ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:3px}
-    @keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
-    @keyframes slideIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
-    @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
-    @keyframes bar{0%{left:-40%}100%{left:100%}}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .loading-dot{animation:pulse 1.4s ease-in-out infinite}
-    .loading-dot:nth-child(2){animation-delay:.2s}.loading-dot:nth-child(3){animation-delay:.4s}
-    .topbar{position:fixed;top:0;left:0;right:0;height:3px;background:#E5E7EB;z-index:1000;overflow:hidden}
-    .topbar span{position:absolute;top:0;height:3px;width:40%;background:#2D5BFF;animation:bar 1s linear infinite}
-    .spin{display:inline-block;width:12px;height:12px;border:2px solid #C7D2FE;border-top-color:#2D5BFF;border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
-    @media(max-width:768px){
-      .app-layout{flex-direction:column!important}
-      .sidebar{width:100%!important;border-right:none!important;border-bottom:1px solid #E5E7EB;padding:10px 0!important}
-      .sidebar .nav-section{display:flex;overflow-x:auto;gap:0!important;padding:0 8px!important}
-      .sidebar .nav-btn{white-space:nowrap;border-right:none!important;border-bottom:3px solid transparent!important;padding:8px 14px!important;font-size:12px!important}
-      .sidebar .nav-btn.active{border-bottom-color:#2D5BFF!important;border-right-color:transparent!important}
-      .sidebar .user-info{display:none}
-      .main-content{padding:16px!important}
-      .stat-row{flex-direction:column!important}
-      .form-row{flex-direction:column!important}
-      .header-inner{padding:0 14px!important}
-      .phone-grid{grid-template-columns:1fr!important}
-    }
-  </style>
-</head>
-<body>
-<div id="root"></div>
+// ╔══════════════════════════════════════════════════════════╗
+// ║  OfficeDesk — Google Apps Script Backend                ║
+// ║  v5  • Assignee can Accept (with a promised date)        ║
+// ║        or Decline (with a reason) — EA sees both         ║
+// ╚══════════════════════════════════════════════════════════╝
 
-<script type="text/babel">
-const { useState, useEffect, useCallback, useRef } = React;
+const SHEET_ID = '1vvDqAf8zaoOXm1dmRaz3ybY42KSSLNSmj1n7PNL9YpQ';
 
-// ╔══════════════════════════════════════════════════════════════╗
-// ║  CONFIGURATION                                              ║
-// ╚══════════════════════════════════════════════════════════════╝
-const CONFIG = {
-  GOOGLE_CLIENT_ID: '768240328001-153jkt92ph1ai4adgk69hdeg8amchtj5.apps.googleusercontent.com',
-  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbxBSNOkK_KrHJ7I5X5ihA7c1ouN6kdst1Lu6jxAFS2nAxosJIYRcbwnhH9KQJYt8a5z/exec'
-};
+// Tasks sheet layout (15 columns):
+// A id  B title  C description  D assignedTo  E assignedBy  F linkedProblem
+// G type  H status  I dueDate  J createdDate  K assigneeName
+// L response  M responseNote  N promisedDate  O respondedOn
+const TASK_COLS = 15;
+const PROBLEM_COLS = 10;
+const EMP_COLS = 7;
 
-// ──────────── CONSTANTS ────────────
-const CATEGORIES = ["General Issue", "IT / Computer", "Maintenance", "Follow-up", "Other"];
-const TYPES = ["Issue", "Task", "Request", "Complaint"];
+// ──────────── REQUEST HANDLING ────────────
 
-const typeColor = (t) => ({ Issue: "#EF4444", Task: "#2563EB", Request: "#0891B2", Complaint: "#F59E0B" }[t] || "#6B7280");
-const statusColor = (s) => ({ Open: "#8B5CF6", Assigned: "#2563EB", "In Progress": "#F59E0B", Resolved: "#10B981", Closed: "#6B7280", Pending: "#8B5CF6", Completed: "#10B981" }[s] || "#6B7280");
-
-// Turn "98765 43210" / "+91-98765-43210" into a dialable string
-const cleanPhone = (p) => String(p || "").replace(/[^\d+]/g, "");
-const waNumber = (p) => {
-  const d = cleanPhone(p).replace(/^\+/, "");
-  return d.length === 10 ? "91" + d : d;
-};
-
-// ──────────── API HELPER ────────────
-async function api(action, data = {}) {
-  const resp = await fetch(CONFIG.APPS_SCRIPT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action, ...data }),
-    redirect: 'follow'
-  });
-  if (!resp.ok) throw new Error('Server replied ' + resp.status);
-  const text = await resp.text();
+function doPost(e) {
   try {
-    return JSON.parse(text);
-  } catch {
-    // Apps Script returns an HTML error page when the deployment is stale
-    throw new Error('Bad response from server — redeploy the Apps Script as a NEW version.');
+    const data = JSON.parse(e.postData.contents);
+    let result;
+
+    switch (data.action) {
+      case 'login':           result = handleLogin(data.email); break;
+      case 'getAllData':      result = getAllData(data.email); break;
+      case 'addProblem':      result = addProblem(data); break;
+      case 'addTask':         result = addTask(data); break;
+      case 'updateTaskStatus':result = updateTaskStatus(data); break;
+      case 'respondToTask':   result = respondToTask(data); break;
+      case 'getEmployees':    result = getEmployeeList(data.email); break;
+      default:                result = { success: false, error: 'Unknown action: ' + data.action };
+    }
+
+    return jsonOut(result);
+
+  } catch (err) {
+    return jsonOut({ success: false, error: 'Server error: ' + (err && err.message ? err.message : err) });
   }
 }
 
-// ──────────── SMALL COMPONENTS ────────────
-function Badge({ text, color }) {
-  return <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 999, fontSize: 11, fontWeight: 600, letterSpacing: 0.3, background: color + "18", color, border: `1px solid ${color}40`, textTransform: "uppercase" }}>{text}</span>;
+function doGet(e) {
+  return jsonOut({ status: 'OfficeDesk API is running', version: 5 });
 }
 
-function Avatar({ initials, size = 36, color = "#2D5BFF", picture }) {
-  if (picture) return <img src={picture} alt="" style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} referrerPolicy="no-referrer" />;
-  return <div style={{ width: size, height: size, borderRadius: "50%", background: color + "16", color, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: size * 0.36, letterSpacing: 0.5, flexShrink: 0 }}>{initials}</div>;
+function jsonOut(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
-function StatCard({ label, value, color, icon }) {
-  return (
-    <div style={{ background: "#fff", borderRadius: 12, padding: "20px 22px", flex: 1, minWidth: 130, boxShadow: "0 1px 3px #0001", border: "1px solid #E5E7EB" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-        <span style={{ fontSize: 22 }}>{icon}</span>
-        <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
-      </div>
-      <div style={{ fontSize: 32, fontWeight: 800, color }}>{value}</div>
-    </div>
-  );
-}
+// ──────────── SAFE ROW READER ────────────
+// Pads every row to `width`, so a sheet with fewer filled columns
+// never causes an out-of-range error.
 
-function EmptyState({ icon, title, subtitle }) {
-  return (
-    <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: "48px 24px", textAlign: "center", color: "#9CA3AF" }}>
-      <div style={{ fontSize: 40, marginBottom: 12 }}>{icon}</div>
-      <div style={{ fontWeight: 600, fontSize: 15 }}>{title}</div>
-      {subtitle && <div style={{ fontSize: 13, marginTop: 4 }}>{subtitle}</div>}
-    </div>
-  );
-}
+function readRows(sheet, width) {
+  if (!sheet) return [];
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return [];
 
-function LoadingSpinner({ text = "Loading..." }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 300, gap: 16 }}>
-      <div style={{ display: "flex", gap: 6 }}>
-        <div className="loading-dot" style={{ width: 10, height: 10, borderRadius: "50%", background: "#2D5BFF" }} />
-        <div className="loading-dot" style={{ width: 10, height: 10, borderRadius: "50%", background: "#2D5BFF" }} />
-        <div className="loading-dot" style={{ width: 10, height: 10, borderRadius: "50%", background: "#2D5BFF" }} />
-      </div>
-      <div style={{ fontSize: 14, color: "#6B7280", fontWeight: 500 }}>{text}</div>
-    </div>
-  );
-}
-
-function ErrorPanel({ message, onRetry, busy }) {
-  return (
-    <div style={{ background: "#fff", border: "1px solid #FECACA", borderRadius: 12, padding: 24, maxWidth: 620 }}>
-      <div style={{ fontWeight: 700, fontSize: 15, color: "#DC2626", marginBottom: 6 }}>Couldn't load data</div>
-      <div style={{ fontSize: 13, color: "#6B7280", lineHeight: 1.6, marginBottom: 16 }}>{message}</div>
-      <button onClick={onRetry} disabled={busy}
-        style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: "#2D5BFF", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>
-        {busy ? <span><span className="spin" /> Retrying…</span> : "Try again"}
-      </button>
-    </div>
-  );
-}
-
-// ──────────── PHONE CARD ────────────
-function PhoneCard({ emp, isSelf }) {
-  const phone = cleanPhone(emp.phone);
-  const btn = { flex: 1, padding: "9px 12px", borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: "none", textAlign: "center", display: "block" };
-  return (
-    <div style={{ background: "#fff", borderRadius: 12, border: `1px solid ${isSelf ? "#C7D2FE" : "#E5E7EB"}`, padding: 18 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-        <Avatar initials={emp.avatar} size={44} color={emp.role === "EA" ? "#7C3AED" : "#2D5BFF"} />
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>{emp.name}{isSelf && <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 500 }}> · you</span>}</div>
-          <div style={{ fontSize: 12, color: "#9CA3AF" }}>{emp.dept} · {emp.role}</div>
-          <div style={{ fontSize: 12.5, color: "#374151", marginTop: 3, fontFamily: "monospace" }}>{emp.phone || "No number saved"}</div>
-        </div>
-      </div>
-      {phone ? (
-        <div style={{ display: "flex", gap: 8 }}>
-          <a href={`tel:${phone}`} style={{ ...btn, background: "#EEF2FF", color: "#2D5BFF" }}>{"\u{1F4DE}"} Call</a>
-          <a href={`https://wa.me/${waNumber(emp.phone)}`} target="_blank" rel="noreferrer" style={{ ...btn, background: "#DCFCE7", color: "#15803D" }}>{"\u{1F4AC}"} WhatsApp</a>
-        </div>
-      ) : (
-        <div style={{ fontSize: 12, color: "#9CA3AF" }}>Add a number in the Employees sheet (column G) to enable calling.</div>
-      )}
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════
-// ║  LOGIN SCREEN
-// ══════════════════════════════════════════════════
-function LoginScreen({ onLogin }) {
-  const [error, setError] = useState(null);
-  const [checking, setChecking] = useState(false);
-  const btnRef = useRef(null);
-
-  useEffect(() => {
-    const initGSI = () => {
-      if (!window.google?.accounts) {
-        setTimeout(initGSI, 200);
-        return;
-      }
-      google.accounts.id.initialize({
-        client_id: CONFIG.GOOGLE_CLIENT_ID,
-        callback: handleCredential,
-        auto_select: false,
-      });
-      google.accounts.id.renderButton(btnRef.current, {
-        theme: 'outline', size: 'large', width: 320, text: 'signin_with', shape: 'rectangular'
-      });
-    };
-    initGSI();
-  }, []);
-
-  const handleCredential = async (response) => {
-    setChecking(true); setError(null);
-    try {
-      const payload = JSON.parse(atob(response.credential.split('.')[1]));
-      const result = await api('login', { email: payload.email });
-
-      if (result.success) {
-        const session = {
-          employee: result.employee,
-          email: payload.email,
-          picture: payload.picture,
-          credential: response.credential,
-          loginTime: Date.now()
-        };
-        sessionStorage.setItem('officedesk_session', JSON.stringify(session));
-        onLogin(session);
-      } else {
-        setError(result.error || 'Login failed. Your email is not authorized.');
-      }
-    } catch (err) {
-      setError(err.message || 'Connection error. Check your internet and try again.');
-    }
-    setChecking(false);
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, #F3F4F8 0%, #E8ECFF 100%)" }}>
-      <div style={{ background: "#fff", borderRadius: 20, padding: "48px 44px", maxWidth: 420, width: "90%", boxShadow: "0 8px 40px #2D5BFF12", textAlign: "center", border: "1px solid #E5E7EB" }}>
-
-        <img src="logo.png" alt="Office Logo" style={{ height: 72, marginBottom: 20, objectFit: "contain" }}
-          onError={(e) => { e.target.style.display = 'none'; }} />
-
-        <h1 style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: "#1A1D23" }}>OfficeDesk</h1>
-        <p style={{ fontSize: 14, color: "#6B7280", marginBottom: 32, lineHeight: 1.5 }}>
-          Task & Problem Management System<br />
-          <span style={{ fontSize: 12 }}>Sign in with your authorized Gmail to continue</span>
-        </p>
-
-        {checking ? (
-          <LoadingSpinner text="Verifying your access..." />
-        ) : (
-          <div style={{ display: "flex", justifyContent: "center" }}>
-            <div ref={btnRef}></div>
-          </div>
-        )}
-
-        {error && (
-          <div style={{ marginTop: 20, padding: "12px 16px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, color: "#DC2626", fontSize: 13, fontWeight: 500, animation: "fadeIn 0.3s" }}>
-            {error}
-          </div>
-        )}
-
-        <div style={{ marginTop: 32, fontSize: 11, color: "#9CA3AF" }}>
-          Only authorized employees can access this system
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════
-// ║  MAIN APP (after login)
-// ══════════════════════════════════════════════════
-function Dashboard({ session, onLogout }) {
-  const [view, setView] = useState("dashboard");
-  const [problems, setProblems] = useState([]);
-  const [tasks, setTasks] = useState([]);
-  const [employees, setEmployees] = useState([]);
-  const [loading, setLoading] = useState(true);      // first load only
-  const [refreshing, setRefreshing] = useState(false); // every reload after that
-  const [loadError, setLoadError] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [notification, setNotification] = useState(null);
-  const [problemForm, setProblemForm] = useState({ title: "", category: "General Issue", type: "Issue", description: "", suggestedTo: "" });
-  const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
-  const [prefilledFrom, setPrefilledFrom] = useState("");
-
-  const user = session.employee;
-  const isEA = user.role === 'EA';
-
-  const notify = (msg, isError = false) => {
-    setNotification({ msg, isError });
-    setTimeout(() => setNotification(null), 4000);
-  };
-
-  // ── Load data ── (never shows a toast; failures go to loadError)
-  const refreshData = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      const result = await api('getAllData', { email: session.email });
-      if (result.success) {
-        setProblems(result.problems || []);
-        setTasks(result.tasks || []);
-        setEmployees(result.employees || []);
-        setLoadError(null);
-      } else {
-        setLoadError(result.error || 'The server returned no data.');
-      }
-    } catch (err) {
-      setLoadError(err.message || 'Connection error. Check your internet.');
-    }
-    setRefreshing(false);
-    setLoading(false);
-  }, [session.email]);
-
-  useEffect(() => { refreshData(); }, [refreshData]);
-
-  // ── Submit Problem ──
-  const submitProblem = async () => {
-    if (!problemForm.title.trim()) { notify("Please enter a title", true); return; }
-    setSaving(true);
-    let saved = false;
-    try {
-      const result = await api('addProblem', { email: session.email, ...problemForm });
-      if (result.success) {
-        saved = true;
-        setProblemForm({ title: "", category: "General Issue", type: "Issue", description: "", suggestedTo: "" });
-      } else { notify(result.error, true); }
-    } catch (err) { notify(err.message || "Failed to submit", true); }
-    setSaving(false);
-
-    // Refresh AFTER saving — a refresh problem must not look like a save failure
-    if (saved) {
-      await refreshData();
-      notify("Saved successfully!");
-      setView("myproblems");
-    }
-  };
-
-  // ── Submit Task ──
-  const submitTask = async () => {
-    if (!taskForm.title.trim()) { notify("Please enter a task title", true); return; }
-    if (!taskForm.assignedTo) { notify("Please select an employee", true); return; }
-    setSaving(true);
-    let assignedName = "";
-    try {
-      const result = await api('addTask', { email: session.email, ...taskForm });
-      if (result.success) {
-        assignedName = result.task?.assigneeName || "employee";
-        setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
-        setPrefilledFrom("");
-      } else { notify(result.error, true); }
-    } catch (err) { notify(err.message || "Failed to assign", true); }
-    setSaving(false);
-
-    if (assignedName) {
-      await refreshData();
-      notify("Task assigned to " + assignedName + "!");
-      setView("tasks");
-    }
-  };
-
-  // ── Update Task Status ──
-  const updateTaskStatus = async (taskId, newStatus) => {
-    setSaving(true);
-    let ok = false;
-    try {
-      const result = await api('updateTaskStatus', { email: session.email, taskId, newStatus });
-      if (result.success) ok = true;
-      else notify(result.error, true);
-    } catch (err) { notify(err.message || "Failed to update", true); }
-    setSaving(false);
-    if (ok) { await refreshData(); notify("Task updated to " + newStatus); }
-  };
-
-  const handleLogout = () => {
-    sessionStorage.removeItem('officedesk_session');
-    if (window.google?.accounts) google.accounts.id.disableAutoSelect();
-    onLogout();
-  };
-
-  const openProblems = problems.filter(p => p.status === "Open");
-  const myTasks = tasks;
-  const myProblems = problems;
-
-  const navItems = isEA
-    ? [{ key: "dashboard", label: "Dashboard", icon: "\u{1F4CA}" }, { key: "problems", label: "Entries", icon: "\u{1F4CB}" }, { key: "tasks", label: "All Tasks", icon: "\u{1F4CC}" }, { key: "assign", label: "Assign Task", icon: "\u{2795}" }, { key: "team", label: "Contacts", icon: "\u{1F4DE}" }]
-    : [{ key: "dashboard", label: "Dashboard", icon: "\u{1F4CA}" }, { key: "report", label: "Report Problem", icon: "\u{1F6A8}" }, { key: "mytasks", label: "My Tasks", icon: "\u{2705}" }, { key: "myproblems", label: "My Entries", icon: "\u{1F4DD}" }, { key: "team", label: "Contacts", icon: "\u{1F4DE}" }];
-
-  const inp = { width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #D1D5DB", fontSize: 14, outline: "none", fontFamily: "inherit", boxSizing: "border-box", background: "#FAFBFC" };
-  const lbl = { display: "block", marginBottom: 4, fontSize: 12, fontWeight: 600, color: "#374151", letterSpacing: 0.3 };
-  const btnP = { padding: "10px 24px", borderRadius: 8, border: "none", background: "#2D5BFF", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" };
-  const btnS = { ...btnP, background: "#F3F4F6", color: "#374151" };
-
-  if (loading) return <LoadingSpinner text="Loading your workspace..." />;
-
-  const getName = (email) => {
-    const emp = employees.find(e => e.email === email);
-    return emp ? emp.name : (email || "Unknown");
-  };
-
-  const suggestableEmployees = employees.filter(e => e.role !== "EA" && e.email !== session.email);
-
-  return (
-    <div style={{ minHeight: "100vh" }}>
-
-      {/* Top loading bar — visible on every refresh */}
-      {refreshing && <div className="topbar"><span /></div>}
-
-      {/* Notification */}
-      {notification && (
-        <div style={{ position: "fixed", top: 16, right: 16, background: notification.isError ? "#EF4444" : "#10B981", color: "#fff", padding: "12px 24px", borderRadius: 10, fontWeight: 600, fontSize: 14, zIndex: 999, boxShadow: `0 4px 20px ${notification.isError ? "#EF444440" : "#10B98140"}`, animation: "fadeIn 0.3s", maxWidth: 360 }}>
-          {notification.isError ? "\u2718" : "\u2713"} {notification.msg}
-        </div>
-      )}
-
-      {/* Saving overlay */}
-      {saving && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "#00000020", zIndex: 998, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#fff", borderRadius: 12, padding: "20px 32px", boxShadow: "0 4px 20px #0002" }}>
-            <LoadingSpinner text="Saving..." />
-          </div>
-        </div>
-      )}
-
-      {/* Header */}
-      <header className="header-inner" style={{ background: "#fff", borderBottom: "1px solid #E5E7EB", height: 64, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 28px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <img src="logo.png" alt="" style={{ height: 38, objectFit: "contain" }}
-            onError={(e) => {
-              e.target.style.display = 'none';
-              e.target.nextSibling.style.display = 'flex';
-            }} />
-          <div style={{ width: 36, height: 36, borderRadius: 8, background: "linear-gradient(135deg, #2D5BFF, #7C3AED)", display: "none", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 16 }}>O</div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.2 }}>OfficeDesk</div>
-            <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500 }}>
-              {refreshing ? <span><span className="spin" /> Refreshing…</span> : "Task & Problem Management"}
-            </div>
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>{user.name}</div>
-            <div style={{ fontSize: 11, color: "#9CA3AF" }}>{user.role} · {user.dept}</div>
-          </div>
-          <Avatar initials={user.avatar} picture={session.picture} color={isEA ? "#7C3AED" : "#2D5BFF"} />
-          <button onClick={handleLogout} title="Sign out"
-            style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", fontSize: 12, color: "#6B7280", fontWeight: 500 }}>
-            Sign out
-          </button>
-        </div>
-      </header>
-
-      <div className="app-layout" style={{ display: "flex", minHeight: "calc(100vh - 64px)" }}>
-
-        {/* Sidebar */}
-        <nav className="sidebar" style={{ width: 220, background: "#fff", borderRight: "1px solid #E5E7EB", padding: "20px 0", flexShrink: 0 }}>
-          <div className="user-info" style={{ padding: "0 16px 16px", borderBottom: "1px solid #F3F4F6", marginBottom: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>
-              {isEA ? "EA Panel" : "Employee Panel"}
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{user.name}</div>
-            <div style={{ fontSize: 11, color: "#9CA3AF" }}>{user.dept}</div>
-          </div>
-          <div className="nav-section">
-            {navItems.map(item => (
-              <button key={item.key} className={`nav-btn ${view === item.key ? "active" : ""}`}
-                onClick={() => setView(item.key)}
-                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 20px", border: "none",
-                  background: view === item.key ? "#EEF2FF" : "transparent",
-                  color: view === item.key ? "#2D5BFF" : "#4B5563",
-                  fontSize: 13.5, fontWeight: view === item.key ? 600 : 500, cursor: "pointer", fontFamily: "inherit", textAlign: "left",
-                  borderRight: view === item.key ? "3px solid #2D5BFF" : "3px solid transparent", transition: "all 0.15s" }}>
-                <span style={{ fontSize: 16 }}>{item.icon}</span> {item.label}
-              </button>
-            ))}
-          </div>
-          <div style={{ padding: "12px 16px", marginTop: 12, borderTop: "1px solid #F3F4F6" }}>
-            <button onClick={refreshData} disabled={refreshing}
-              style={{ ...btnS, width: "100%", fontSize: 12, padding: "8px 12px", opacity: refreshing ? 0.65 : 1, cursor: refreshing ? "default" : "pointer" }}>
-              {refreshing ? <span><span className="spin" /> Refreshing…</span> : <span>{"\u{1F504}"} Refresh Data</span>}
-            </button>
-          </div>
-        </nav>
-
-        {/* Main Content */}
-        <main className="main-content" style={{ flex: 1, padding: 28, overflowY: "auto", maxHeight: "calc(100vh - 64px)" }}>
-
-          {loadError && (
-            <div style={{ marginBottom: 24 }}>
-              <ErrorPanel message={loadError} onRetry={refreshData} busy={refreshing} />
-            </div>
-          )}
-
-          {/* ═══ DASHBOARD ═══ */}
-          {view === "dashboard" && (
-            <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>{isEA ? "EA Dashboard" : "My Dashboard"}</h2>
-              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>{isEA ? "Overview of all office entries and task assignments" : `Welcome back, ${user.name.split(" ")[0]}`}</p>
-
-              <div className="stat-row" style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 28 }}>
-                <StatCard label={isEA ? "Open Entries" : "My Entries"} value={isEA ? openProblems.length : myProblems.length} color="#8B5CF6" icon={"\u{1F514}"} />
-                <StatCard label={isEA ? "Total Tasks" : "My Tasks"} value={myTasks.length} color="#2D5BFF" icon={"\u{1F4CC}"} />
-                <StatCard label="In Progress" value={myTasks.filter(t => t.status === "In Progress").length} color="#F59E0B" icon={"\u{23F3}"} />
-                <StatCard label="Completed" value={myTasks.filter(t => t.status === "Completed").length} color="#10B981" icon={"\u{2705}"} />
-              </div>
-
-              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", overflow: "hidden" }}>
-                <div style={{ padding: "16px 20px", borderBottom: "1px solid #F3F4F6", fontWeight: 700, fontSize: 15 }}>Recent Activity</div>
-                {[...myProblems.slice(0, 4).map(p => ({ kind: "problem", data: p, date: p.date })),
-                  ...myTasks.slice(0, 4).map(t => ({ kind: "task", data: t, date: t.createdDate }))]
-                  .sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 6)
-                  .map((item, i) => (
-                    <div key={i} style={{ padding: "14px 20px", borderBottom: "1px solid #F9FAFB", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: item.kind === "problem" ? "#8B5CF6" : "#2D5BFF", flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          <span style={{ color: "#9CA3AF", marginRight: 8, fontFamily: "monospace", fontSize: 12 }}>{item.data.id}</span>
-                          {item.data.title}
-                        </div>
-                        <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>
-                          {item.kind === "problem" ? `Reported by ${item.data.reportedBy}` : `Assigned to ${item.data.assigneeName || item.data.assignedTo}`} · {item.date}
-                        </div>
-                      </div>
-                      <Badge text={item.data.status} color={statusColor(item.data.status)} />
-                      {item.data.type && <Badge text={item.data.type} color={typeColor(item.data.type)} />}
-                    </div>
-                  ))}
-                {myProblems.length === 0 && myTasks.length === 0 && (
-                  <div style={{ padding: 32, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No activity yet</div>
-                )}
-              </div>
-
-              {!isEA && (
-                <div style={{ marginTop: 24, display: "flex", gap: 12, flexWrap: "wrap" }}>
-                  <button style={btnP} onClick={() => setView("report")}>{"\u{1F6A8}"} Report a Problem</button>
-                  <button style={btnS} onClick={() => setView("mytasks")}>{"\u{2705}"} View My Tasks</button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ═══ CONTACTS / PHONE CARDS ═══ */}
-          {view === "team" && (
-            <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>Contacts</h2>
-              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Tap Call or WhatsApp to reach anyone directly from your phone</p>
-              {employees.length === 0
-                ? <EmptyState icon={"\u{1F4DE}"} title="No contacts loaded" />
-                : <div className="phone-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
-                    {employees.map(e => <PhoneCard key={e.id || e.email} emp={e} isSelf={e.email === session.email} />)}
-                  </div>
-              }
-            </div>
-          )}
-
-          {/* ═══ REPORT PROBLEM ═══ */}
-          {view === "report" && !isEA && (
-            <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>Report a Problem</h2>
-              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Submit your issue, request or complaint — the EA will review and assign it</p>
-              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 28, maxWidth: 600 }}>
-                <div style={{ marginBottom: 18 }}>
-                  <label style={lbl}>Title *</label>
-                  <input style={inp} placeholder="e.g., Printer not working in dispatch room" value={problemForm.title} onChange={e => setProblemForm(f => ({ ...f, title: e.target.value }))} />
-                </div>
-                <div className="form-row" style={{ display: "flex", gap: 16, marginBottom: 18 }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={lbl}>Category</label>
-                    <select style={inp} value={problemForm.category} onChange={e => setProblemForm(f => ({ ...f, category: e.target.value }))}>
-                      {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={lbl}>Type</label>
-                    <select style={inp} value={problemForm.type} onChange={e => setProblemForm(f => ({ ...f, type: e.target.value }))}>
-                      {TYPES.map(t => <option key={t}>{t}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <div style={{ marginBottom: 18 }}>
-                  <label style={lbl}>Description</label>
-                  <textarea style={{ ...inp, minHeight: 100, resize: "vertical" }} placeholder="Describe it in detail..." value={problemForm.description} onChange={e => setProblemForm(f => ({ ...f, description: e.target.value }))} />
-                </div>
-                <div style={{ marginBottom: 24 }}>
-                  <label style={lbl}>{"\u{1F464}"} Suggest Person (optional)</label>
-                  <select style={inp} value={problemForm.suggestedTo} onChange={e => setProblemForm(f => ({ ...f, suggestedTo: e.target.value }))}>
-                    <option value="">{"\u2014"} Let the EA decide {"\u2014"}</option>
-                    {suggestableEmployees.map(e => <option key={e.email} value={e.email}>{e.name} — {e.dept}</option>)}
-                  </select>
-                  <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 5, lineHeight: 1.5 }}>
-                    अगर ये काम किसी particular person का है तो यहाँ नाम चुनें — EA को entry के साथ ये suggestion दिखेगा.
-                  </div>
-                </div>
-                <button style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitProblem} disabled={saving}>Submit</button>
-              </div>
-            </div>
-          )}
-
-          {/* ═══ MY TASKS ═══ */}
-          {view === "mytasks" && !isEA && (
-            <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>My Tasks</h2>
-              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Tasks assigned to you by the EA</p>
-              {myTasks.length === 0
-                ? <EmptyState icon={"\u{1F4ED}"} title="No tasks assigned yet" subtitle="Tasks assigned by the EA will appear here" />
-                : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {myTasks.map(t => (
-                      <div key={t.id} style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 20 }}>
-                        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                          <div style={{ flex: 1, minWidth: 200 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                              <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
-                              {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
-                              <Badge text={t.status} color={statusColor(t.status)} />
-                            </div>
-                            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{t.title}</div>
-                            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>{t.description}</div>
-                            <div style={{ fontSize: 12, color: "#9CA3AF" }}>
-                              Due: {t.dueDate || "No deadline"}
-                              {t.linkedProblem && <span> · Linked: {t.linkedProblem}</span>}
-                            </div>
-                          </div>
-                          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                            {t.status === "Pending" && <button style={{ ...btnS, fontSize: 12, padding: "6px 14px" }} onClick={() => updateTaskStatus(t.id, "In Progress")}>{"\u{25B6}"} Start Task</button>}
-                            {t.status === "In Progress" && <button style={{ ...btnP, fontSize: 12, padding: "6px 14px", background: "#10B981" }} onClick={() => updateTaskStatus(t.id, "Completed")}>{"\u{2713}"} Mark Done</button>}
-                            {t.status === "Completed" && <span style={{ fontSize: 12, color: "#10B981", fontWeight: 600 }}>{"\u{2705}"} Done</span>}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-              }
-            </div>
-          )}
-
-          {/* ═══ MY ENTRIES ═══ */}
-          {view === "myproblems" && !isEA && (
-            <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>My Entries</h2>
-              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Track the status of everything you've reported</p>
-              {myProblems.length === 0
-                ? <EmptyState icon={"\u{1F4DD}"} title="Nothing reported yet" subtitle='Go to "Report Problem" to submit one' />
-                : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {myProblems.map(p => (
-                      <div key={p.id} style={{ background: "#fff", borderRadius: 12, border: `1px solid ${p.status === "Resolved" ? "#D1FAE5" : "#E5E7EB"}`, padding: 20 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                          <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{p.id}</span>
-                          {p.category && <Badge text={p.category} color="#6B7280" />}
-                          {p.type && <Badge text={p.type} color={typeColor(p.type)} />}
-                          <Badge text={p.status} color={statusColor(p.status)} />
-                        </div>
-                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{p.title}</div>
-                        <div style={{ fontSize: 13, color: "#6B7280" }}>{p.description}</div>
-                        <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 6 }}>
-                          Reported on {p.date}
-                          {(p.suggestedName || p.suggestedTo) && (
-                            <span style={{ color: "#7C3AED", fontWeight: 600 }}> · Suggested: {p.suggestedName || getName(p.suggestedTo)}</span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-              }
-            </div>
-          )}
-
-          {/* ═══ EA: ALL ENTRIES ═══ */}
-          {view === "problems" && isEA && (
-            <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>All Reported Entries</h2>
-              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Review and assign tasks · <strong>{openProblems.length} open</strong></p>
-              {problems.length === 0
-                ? <EmptyState icon={"\u{1F4CB}"} title="Nothing reported yet" />
-                : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {problems.map(p => (
-                      <div key={p.id} style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 20 }}>
-                        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                          <div style={{ flex: 1, minWidth: 200 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                              <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{p.id}</span>
-                              {p.category && <Badge text={p.category} color="#6B7280" />}
-                              {p.type && <Badge text={p.type} color={typeColor(p.type)} />}
-                              <Badge text={p.status} color={statusColor(p.status)} />
-                              {(p.suggestedName || p.suggestedTo) && (
-                                <Badge text={`For: ${p.suggestedName || getName(p.suggestedTo)}`} color="#7C3AED" />
-                              )}
-                            </div>
-                            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{p.title}</div>
-                            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>{p.description}</div>
-                            <div style={{ fontSize: 12, color: "#9CA3AF" }}>
-                              Reported by: {p.reportedBy} · {p.date}
-                              {(p.suggestedName || p.suggestedTo) && (
-                                <span style={{ color: "#7C3AED", fontWeight: 600 }}> · {"\u{1F464}"} Suggested: {p.suggestedName || getName(p.suggestedTo)}</span>
-                              )}
-                            </div>
-                          </div>
-                          {p.status === "Open" && (
-                            <button style={{ ...btnP, fontSize: 12, padding: "8px 16px", background: "#7C3AED", flexShrink: 0 }}
-                              onClick={() => {
-                                setTaskForm(f => ({
-                                  ...f,
-                                  title: `Resolve: ${p.title}`,
-                                  description: p.description,
-                                  linkedProblem: p.id,
-                                  type: TYPES.includes(p.type) ? p.type : "Task",
-                                  assignedTo: p.suggestedTo || ""
-                                }));
-                                setPrefilledFrom(p.suggestedTo ? (p.suggestedName || getName(p.suggestedTo)) : "");
-                                setView("assign");
-                              }}>
-                              Assign Task {"\u{2192}"}
-                            </button>
-                          )}
-                          {p.status !== "Open" && (
-                            <span style={{ fontSize: 12, color: statusColor(p.status), fontWeight: 600 }}>
-                              {p.status === "Assigned" ? "\u{23F3} Task assigned" : p.status === "Resolved" ? "\u{2705} Resolved" : p.status}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-              }
-            </div>
-          )}
-
-          {/* ═══ EA: ALL TASKS ═══ */}
-          {view === "tasks" && isEA && (
-            <div style={{ animation: "slideIn 0.3s" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>All Tasks</h2>
-                  <p style={{ margin: "6px 0 0", color: "#6B7280", fontSize: 14 }}>Monitor progress of every assigned task</p>
-                </div>
-                <button style={btnP} onClick={() => { setPrefilledFrom(""); setView("assign"); }}>{"\u{2795}"} New Task</button>
-              </div>
-              {tasks.length === 0
-                ? <EmptyState icon={"\u{1F4CC}"} title="No tasks created yet" subtitle='Go to "Assign Task" to create one' />
-                : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {tasks.map(t => (
-                      <div key={t.id} style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : "#E5E7EB"}`, padding: 20 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                          <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
-                          {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
-                          <Badge text={t.status} color={statusColor(t.status)} />
-                        </div>
-                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{t.title}</div>
-                        <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>{t.description}</div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 12, color: "#9CA3AF", flexWrap: "wrap" }}>
-                          <span>{"\u{1F464}"} {t.assigneeName || t.assignedTo}</span>
-                          <span>Due: {t.dueDate || "\u{2014}"}</span>
-                          {t.linkedProblem && <span>Linked: {t.linkedProblem}</span>}
-                          <span>Created: {t.createdDate}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-              }
-            </div>
-          )}
-
-          {/* ═══ EA: ASSIGN TASK ═══ */}
-          {view === "assign" && isEA && (
-            <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700 }}>Assign New Task</h2>
-              <p style={{ margin: "0 0 24px", color: "#6B7280", fontSize: 14 }}>Create a task and assign it to an employee</p>
-              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 28, maxWidth: 600 }}>
-                {taskForm.linkedProblem && (
-                  <div style={{ background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 8, padding: "10px 14px", marginBottom: 20, fontSize: 13, color: "#4338CA" }}>
-                    {"\u{1F517}"} Linked to entry <strong>{taskForm.linkedProblem}</strong> — completing this task will auto-resolve it
-                  </div>
-                )}
-                {prefilledFrom && (
-                  <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 8, padding: "10px 14px", marginBottom: 20, fontSize: 13, color: "#6D28D9" }}>
-                    {"\u{1F464}"} Reporter suggested <strong>{prefilledFrom}</strong> — already selected below. Change it if someone else should handle it.
-                  </div>
-                )}
-                <div style={{ marginBottom: 18 }}>
-                  <label style={lbl}>Task Title *</label>
-                  <input style={inp} placeholder="e.g., Replace printer toner on 3rd floor" value={taskForm.title} onChange={e => setTaskForm(f => ({ ...f, title: e.target.value }))} />
-                </div>
-                <div style={{ marginBottom: 18 }}>
-                  <label style={lbl}>Description</label>
-                  <textarea style={{ ...inp, minHeight: 80, resize: "vertical" }} placeholder="Task details and instructions..." value={taskForm.description} onChange={e => setTaskForm(f => ({ ...f, description: e.target.value }))} />
-                </div>
-                <div className="form-row" style={{ display: "flex", gap: 16, marginBottom: 18 }}>
-                  <div style={{ flex: 1, minWidth: 160 }}>
-                    <label style={lbl}>Assign To *</label>
-                    <select style={inp} value={taskForm.assignedTo} onChange={e => setTaskForm(f => ({ ...f, assignedTo: e.target.value }))}>
-                      <option value="">-- Select Employee --</option>
-                      {employees.filter(e => e.role !== "EA").map(e => <option key={e.email} value={e.email}>{e.name} — {e.dept}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 160 }}>
-                    <label style={lbl}>Type</label>
-                    <select style={inp} value={taskForm.type} onChange={e => setTaskForm(f => ({ ...f, type: e.target.value }))}>
-                      {TYPES.map(t => <option key={t}>{t}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <div className="form-row" style={{ display: "flex", gap: 16, marginBottom: 24 }}>
-                  <div style={{ flex: 1, minWidth: 160 }}>
-                    <label style={lbl}>Due Date</label>
-                    <input type="date" style={inp} value={taskForm.dueDate} onChange={e => setTaskForm(f => ({ ...f, dueDate: e.target.value }))} />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 160 }}>
-                    <label style={lbl}>Link to Entry</label>
-                    <select style={inp} value={taskForm.linkedProblem}
-                      onChange={e => {
-                        const pid = e.target.value;
-                        const linked = problems.find(p => p.id === pid);
-                        setTaskForm(f => ({
-                          ...f,
-                          linkedProblem: pid,
-                          assignedTo: (linked && linked.suggestedTo) ? linked.suggestedTo : f.assignedTo
-                        }));
-                        setPrefilledFrom(linked && linked.suggestedTo ? (linked.suggestedName || getName(linked.suggestedTo)) : "");
-                      }}>
-                      <option value="">{"\u{2014}"} None {"\u{2014}"}</option>
-                      {problems.filter(p => p.status === "Open").map(p => <option key={p.id} value={p.id}>{p.id}: {p.title}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 12 }}>
-                  <button style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitTask} disabled={saving}>Assign Task</button>
-                  <button style={btnS} onClick={() => { setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" }); setPrefilledFrom(""); }}>Clear</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-        </main>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════
-// ║  ROOT APP — handles auth state
-// ══════════════════════════════════════════════════
-function App() {
-  const [session, setSession] = useState(() => {
-    try {
-      const stored = sessionStorage.getItem('officedesk_session');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Date.now() - parsed.loginTime < 8 * 60 * 60 * 1000) return parsed;
-        sessionStorage.removeItem('officedesk_session');
-      }
-    } catch {}
-    return null;
+  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  return values.map(r => {
+    const row = r.slice(0, width);
+    while (row.length < width) row.push('');
+    return row;
   });
-
-  if (!session) return <LoginScreen onLogin={setSession} />;
-  return <Dashboard session={session} onLogout={() => setSession(null)} />;
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-</script>
-</body>
-</html>
+function ensureWidth(sheet, width) {
+  if (sheet && sheet.getMaxColumns() < width) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), width - sheet.getMaxColumns());
+  }
+}
+
+function sameEmail(a, b) {
+  return String(a || '').toLowerCase().trim() === String(b || '').toLowerCase().trim();
+}
+
+function fmtDate(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  return v === null || v === undefined ? '' : String(v);
+}
+
+function todayStr() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+// ──────────── AUTHENTICATION ────────────
+
+function handleLogin(email) {
+  if (!email) return { success: false, error: 'No email received' };
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName('Employees');
+  if (!sheet) return { success: false, error: 'Employees sheet not found' };
+
+  const rows = sheet.getDataRange().getValues();
+  const target = String(email).toLowerCase().trim();
+
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][2] && String(rows[i][2]).toLowerCase().trim() === target) {
+      return {
+        success: true,
+        employee: {
+          id: rows[i][0], name: rows[i][1], email: rows[i][2],
+          role: rows[i][3], dept: rows[i][4], avatar: rows[i][5],
+          phone: rows[i][6] ? String(rows[i][6]).trim() : ''
+        }
+      };
+    }
+  }
+
+  return { success: false, error: 'Your email is not authorized. Contact your administrator.' };
+}
+
+function getEmployeeNameByEmail(ss, email) {
+  if (!email) return '';
+  const empSheet = ss.getSheetByName('Employees');
+  if (!empSheet) return '';
+  const rows = empSheet.getDataRange().getValues();
+  const target = String(email).toLowerCase().trim();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][2] && String(rows[i][2]).toLowerCase().trim() === target) return rows[i][1];
+  }
+  return '';
+}
+
+// ──────────── EMPLOYEE LIST ────────────
+
+function buildEmployeeList(ss) {
+  const empSheet = ss.getSheetByName('Employees');
+  if (!empSheet) return [];
+  return readRows(empSheet, EMP_COLS)
+    .filter(r => r[0] !== '')
+    .map(r => ({
+      id: r[0], name: r[1], email: r[2], role: r[3], dept: r[4], avatar: r[5],
+      phone: r[6] ? String(r[6]).trim() : ''
+    }));
+}
+
+function getEmployeeList(email) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const loginResult = handleLogin(email);
+  if (!loginResult.success) return loginResult;
+  return { success: true, employees: buildEmployeeList(ss) };
+}
+
+// ──────────── GET ALL DATA ────────────
+
+function getAllData(email) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+
+  const loginResult = handleLogin(email);
+  if (!loginResult.success) return loginResult;
+
+  const emp = loginResult.employee;
+  const isEA = emp.role === 'EA';
+
+  let problems = readRows(ss.getSheetByName('Problems'), PROBLEM_COLS)
+    .filter(r => r[0] !== '')
+    .map(r => ({
+      id: r[0], title: r[1], category: r[2], type: r[3],
+      description: r[4], reportedBy: r[5], date: fmtDate(r[6]), status: r[7],
+      suggestedTo: r[8] || '', suggestedName: r[9] || ''
+    }));
+  if (!isEA) problems = problems.filter(p => sameEmail(p.reportedBy, email));
+
+  let tasks = readRows(ss.getSheetByName('Tasks'), TASK_COLS)
+    .filter(r => r[0] !== '')
+    .map(r => ({
+      id: r[0], title: r[1], description: r[2], assignedTo: r[3],
+      assignedBy: r[4], linkedProblem: r[5], type: r[6], status: r[7],
+      dueDate: fmtDate(r[8]), createdDate: fmtDate(r[9]), assigneeName: r[10],
+      response: r[11] || '', responseNote: r[12] || '',
+      promisedDate: fmtDate(r[13]), respondedOn: fmtDate(r[14])
+    }));
+  if (!isEA) tasks = tasks.filter(t => sameEmail(t.assignedTo, email));
+
+  return {
+    success: true,
+    employee: emp,
+    problems: problems.reverse(),
+    tasks: tasks.reverse(),
+    employees: buildEmployeeList(ss)
+  };
+}
+
+// ──────────── ADD PROBLEM ────────────
+
+function addProblem(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+
+  const loginResult = handleLogin(data.email);
+  if (!loginResult.success) return loginResult;
+
+  const sheet = ss.getSheetByName('Problems');
+  if (!sheet) return { success: false, error: 'Problems sheet not found' };
+  ensureWidth(sheet, PROBLEM_COLS);
+
+  const newId = 'P-' + String(sheet.getLastRow()).padStart(3, '0');
+  const today = todayStr();
+  const suggestedTo = data.suggestedTo || '';
+  const suggestedName = getEmployeeNameByEmail(ss, suggestedTo);
+
+  sheet.appendRow([
+    newId, data.title, data.category, data.type, data.description,
+    data.email, today, 'Open', suggestedTo, suggestedName
+  ]);
+
+  return {
+    success: true,
+    problem: {
+      id: newId, title: data.title, category: data.category, type: data.type,
+      description: data.description, reportedBy: data.email, date: today,
+      status: 'Open', suggestedTo: suggestedTo, suggestedName: suggestedName
+    }
+  };
+}
+
+// ──────────── ADD TASK (EA ONLY) ────────────
+
+function addTask(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+
+  const loginResult = handleLogin(data.email);
+  if (!loginResult.success) return loginResult;
+  if (loginResult.employee.role !== 'EA') {
+    return { success: false, error: 'Only EA can assign tasks' };
+  }
+
+  const sheet = ss.getSheetByName('Tasks');
+  if (!sheet) return { success: false, error: 'Tasks sheet not found' };
+  ensureWidth(sheet, TASK_COLS);
+
+  const newId = 'T-' + String(sheet.getLastRow()).padStart(3, '0');
+  const today = todayStr();
+  const assigneeName = getEmployeeNameByEmail(ss, data.assignedTo) || data.assignedTo;
+
+  sheet.appendRow([
+    newId, data.title, data.description, data.assignedTo, data.email,
+    data.linkedProblem || '', data.type, 'Pending',
+    data.dueDate || '', today, assigneeName,
+    '', '', '', ''   // response, responseNote, promisedDate, respondedOn
+  ]);
+
+  if (data.linkedProblem) updateProblemStatus(ss, data.linkedProblem, 'Assigned');
+
+  return {
+    success: true,
+    task: {
+      id: newId, title: data.title, description: data.description,
+      assignedTo: data.assignedTo, assignedBy: data.email,
+      linkedProblem: data.linkedProblem || '', type: data.type,
+      status: 'Pending', dueDate: data.dueDate || '', createdDate: today,
+      assigneeName: assigneeName, response: '', responseNote: '',
+      promisedDate: '', respondedOn: ''
+    }
+  };
+}
+
+// ──────────── RESPOND TO TASK (assignee accepts or declines) ────────────
+// data: { email, taskId, response: 'Accepted' | 'Declined', note, promisedDate }
+
+function respondToTask(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+
+  const loginResult = handleLogin(data.email);
+  if (!loginResult.success) return loginResult;
+
+  const sheet = ss.getSheetByName('Tasks');
+  if (!sheet) return { success: false, error: 'Tasks sheet not found' };
+  ensureWidth(sheet, TASK_COLS);
+
+  const response = data.response === 'Declined' ? 'Declined' : 'Accepted';
+  if (response === 'Accepted' && !data.promisedDate) {
+    return { success: false, error: 'Please give the date you will complete it by' };
+  }
+  if (response === 'Declined' && !String(data.note || '').trim()) {
+    return { success: false, error: 'Please write why you cannot do this task' };
+  }
+
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === data.taskId) {
+      const isEA = loginResult.employee.role === 'EA';
+      if (!sameEmail(rows[i][3], data.email) && !isEA) {
+        return { success: false, error: 'Only the assigned person can respond to this task' };
+      }
+
+      const row = i + 1;
+      const newStatus = response === 'Declined' ? 'Declined' : 'Accepted';
+
+      sheet.getRange(row, 8).setValue(newStatus);                       // H status
+      sheet.getRange(row, 12).setValue(response);                       // L response
+      sheet.getRange(row, 13).setValue(String(data.note || '').trim()); // M note
+      sheet.getRange(row, 14).setValue(response === 'Accepted' ? (data.promisedDate || '') : ''); // N
+      sheet.getRange(row, 15).setValue(todayStr());                     // O respondedOn
+
+      // A declined task frees the linked entry so the EA can reassign it
+      if (response === 'Declined' && rows[i][5]) {
+        updateProblemStatus(ss, rows[i][5], 'Open');
+      }
+
+      return { success: true, status: newStatus };
+    }
+  }
+
+  return { success: false, error: 'Task not found' };
+}
+
+// ──────────── UPDATE TASK STATUS ────────────
+
+function updateTaskStatus(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+
+  const loginResult = handleLogin(data.email);
+  if (!loginResult.success) return loginResult;
+
+  const sheet = ss.getSheetByName('Tasks');
+  if (!sheet) return { success: false, error: 'Tasks sheet not found' };
+
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === data.taskId) {
+      if (!sameEmail(rows[i][3], data.email) && loginResult.employee.role !== 'EA') {
+        return { success: false, error: 'Not authorized to update this task' };
+      }
+
+      sheet.getRange(i + 1, 8).setValue(data.newStatus); // H = status
+
+      if (data.newStatus === 'Completed' && rows[i][5]) {
+        updateProblemStatus(ss, rows[i][5], 'Resolved');
+      }
+
+      return { success: true };
+    }
+  }
+
+  return { success: false, error: 'Task not found' };
+}
+
+function updateProblemStatus(ss, problemId, newStatus) {
+  const sheet = ss.getSheetByName('Problems');
+  if (!sheet) return;
+
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === problemId) {
+      sheet.getRange(i + 1, 8).setValue(newStatus); // H = status
+      break;
+    }
+  }
+}
+
+// ──────────── ONE-TIME UPGRADE (existing sheets) ────────────
+// Safe to run any number of times. Only headers + column count.
+// Result appears in the Execution log (no popup — popups crash
+// standalone scripts).
+
+function upgradeSheets() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+
+  const empSheet = ss.getSheetByName('Employees');
+  if (empSheet) {
+    ensureWidth(empSheet, EMP_COLS);
+    empSheet.getRange(1, 7).setValue('phone');
+    empSheet.getRange(1, 1, 1, EMP_COLS).setFontWeight('bold').setBackground('#E8EAF6');
+  }
+
+  const probSheet = ss.getSheetByName('Problems');
+  if (!probSheet) throw new Error('Problems sheet not found');
+  ensureWidth(probSheet, PROBLEM_COLS);
+  probSheet.getRange(1, 4).setValue('type');
+  probSheet.getRange(1, 9, 1, 2).setValues([['suggestedTo', 'suggestedName']]);
+  probSheet.getRange(1, 1, 1, PROBLEM_COLS).setFontWeight('bold').setBackground('#FFF3E0');
+
+  const taskSheet = ss.getSheetByName('Tasks');
+  if (taskSheet) {
+    ensureWidth(taskSheet, TASK_COLS);
+    taskSheet.getRange(1, 7).setValue('type');
+    taskSheet.getRange(1, 12, 1, 4).setValues([['response', 'responseNote', 'promisedDate', 'respondedOn']]);
+    taskSheet.getRange(1, 1, 1, TASK_COLS).setFontWeight('bold').setBackground('#E8F5E9');
+  }
+
+  Logger.log('Sheets upgraded. Existing rows untouched.');
+  return 'Sheets upgraded';
+}
+
+// ──────────── QUICK SELF-TEST ────────────
+// Run this, then open the Execution log. JSON in the log = backend is fine.
+
+function testGetAllData() {
+  const out = getAllData('mis@satijapaper.com'); // any authorized email
+  Logger.log(JSON.stringify(out).slice(0, 3000));
+  return out;
+}
+
+// ──────────── SETUP (fresh sheet only) ────────────
+
+function setupSheetHeaders() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+
+  let empSheet = ss.getSheetByName('Employees');
+  if (!empSheet) empSheet = ss.insertSheet('Employees');
+  ensureWidth(empSheet, EMP_COLS);
+  empSheet.getRange(1, 1, 1, EMP_COLS).setValues([['id', 'name', 'email', 'role', 'dept', 'avatar', 'phone']]);
+  empSheet.getRange(1, 1, 1, EMP_COLS).setFontWeight('bold').setBackground('#E8EAF6');
+
+  const employees = [
+    ['ea1', 'Neha Nidhi Xaxa', 'mis@satijapaper.com', 'EA', 'Administration', 'NN', '9899708098'],
+    ['e1', 'Mukesh Shukla', 'mukesh.shukla@satijapaper.com', 'Employee', 'Manager', 'MS', '9899708020'],
+    ['e2', 'Indresh Pratap', 'indreshsatijapaper@gmail.com', 'Employee', 'Dispatch', 'IP', '9899708096'],
+    ['e3', 'Pooja', 'poojasatijapaper@gmail.com', 'Employee', 'CRM', 'P', '9899708086'],
+    ['e4', 'Sandeep Dhawan', 'satijapaper@gmail.com', 'Employee', 'Account', 'SD', '9899708009'],
+    ['e5', 'Sonu Chauhan', 'sonusatijapaper@gmail.com', 'Employee', 'Sales', 'SC', '9899703090'],
+    ['e6', 'Pawan Negi', 'pawansatijapaper@gmail.com', 'Employee', 'Sales', 'PN', '9899708010'],
+    ['e7', 'Rishabh Jain', 'rishabhsatijapaper@gmail.com', 'Employee', 'Sales', 'RJ', '9899708060'],
+    ['e8', 'Khushi Painter', 'mis@satijapaper.com', 'Employee', 'MIS', 'KP', '9899709590'],
+    ['e9', 'Richa', 'pc@satijapaper.com', 'Employee', 'PC', 'R', '9667966543'],
+  ];
+  empSheet.getRange(2, 1, employees.length, EMP_COLS).setValues(employees);
+
+  let probSheet = ss.getSheetByName('Problems');
+  if (!probSheet) probSheet = ss.insertSheet('Problems');
+  ensureWidth(probSheet, PROBLEM_COLS);
+  probSheet.getRange(1, 1, 1, PROBLEM_COLS).setValues([['id', 'title', 'category', 'type', 'description', 'reportedBy', 'date', 'status', 'suggestedTo', 'suggestedName']]);
+  probSheet.getRange(1, 1, 1, PROBLEM_COLS).setFontWeight('bold').setBackground('#FFF3E0');
+
+  let taskSheet = ss.getSheetByName('Tasks');
+  if (!taskSheet) taskSheet = ss.insertSheet('Tasks');
+  ensureWidth(taskSheet, TASK_COLS);
+  taskSheet.getRange(1, 1, 1, TASK_COLS).setValues([['id', 'title', 'description', 'assignedTo', 'assignedBy', 'linkedProblem', 'type', 'status', 'dueDate', 'createdDate', 'assigneeName', 'response', 'responseNote', 'promisedDate', 'respondedOn']]);
+  taskSheet.getRange(1, 1, 1, TASK_COLS).setFontWeight('bold').setBackground('#E8F5E9');
+
+  empSheet.autoResizeColumns(1, EMP_COLS);
+  probSheet.autoResizeColumns(1, PROBLEM_COLS);
+  taskSheet.autoResizeColumns(1, TASK_COLS);
+
+  const defaultSheet = ss.getSheetByName('Sheet1');
+  if (defaultSheet && ss.getSheets().length > 1) ss.deleteSheet(defaultSheet);
+
+  Logger.log('Setup complete.');
+  return 'Setup complete';
+}
