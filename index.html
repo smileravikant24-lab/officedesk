@@ -86,6 +86,7 @@ const statusColor = (s) => ({
   Completed: "#10B981", Closed: "#6B7280"
 }[s] || "#6B7280");
 
+const sameMail = (a, b) => String(a || "").toLowerCase().trim() === String(b || "").toLowerCase().trim();
 const cleanPhone = (p) => String(p || "").replace(/[^\d+]/g, "");
 const waNumber = (p) => {
   const d = cleanPhone(p).replace(/^\+/, "");
@@ -223,6 +224,33 @@ function ResponseInfo({ t, forEA }) {
       <div style={{ marginTop: 3 }}>Will complete by <strong>{t.promisedDate || "—"}</strong></div>
       {t.responseNote && <div style={{ marginTop: 3 }}>Note: {t.responseNote}</div>}
       {t.respondedOn && <div style={{ marginTop: 3, opacity: 0.75 }}>Responded on {t.respondedOn}</div>}
+      {t.completedAt && <div style={{ marginTop: 3, color: "#15803D", fontWeight: 600 }}>{"\u2705"} Completed on {t.completedAt}</div>}
+    </div>
+  );
+}
+
+// ──────────── PROGRESS STRIP for the person who REPORTED the entry ────────────
+function ReporterTaskInfo({ t }) {
+  if (!t) return null;
+  const done = t.status === "Completed";
+  return (
+    <div style={{
+      marginTop: 10, padding: "10px 12px", borderRadius: 9,
+      background: done ? "#F0FDF4" : "#F8FAFC",
+      border: `1px solid ${done ? "#BBF7D0" : "#E2E8F0"}`,
+      fontSize: 12.5, color: "#334155", lineHeight: 1.6
+    }}>
+      <div style={{ fontWeight: 700, color: "#0F172A" }}>
+        {"\u{1F4CC}"} {t.id} · with {t.assigneeName || t.assignedTo}
+      </div>
+      {t.response
+        ? <>
+            <div style={{ marginTop: 3 }}>Accepted — will complete by <strong>{t.promisedDate || "—"}</strong></div>
+            {t.responseNote && <div style={{ marginTop: 3 }}>Their note: {t.responseNote}</div>}
+            {t.respondedOn && <div style={{ marginTop: 3, opacity: 0.75 }}>Responded on {t.respondedOn}</div>}
+          </>
+        : <div style={{ marginTop: 3, opacity: 0.8 }}>{"\u{23F3}"} Not accepted yet</div>}
+      {t.completedAt && <div style={{ marginTop: 3, color: "#15803D", fontWeight: 600 }}>{"\u2705"} Completed on {t.completedAt}</div>}
     </div>
   );
 }
@@ -465,8 +493,11 @@ function Dashboard({ session, onLogout }) {
   };
 
   const openProblems = problems.filter(p => p.status === "Open");
-  const myTasks = tasks;
+  // Tasks actually assigned to me (the list also carries tasks raised from my entries)
+  const myTasks = isEA ? tasks : tasks.filter(t => sameMail(t.assignedTo, session.email));
   const myProblems = problems;
+  // Task raised from one of my entries
+  const taskForProblem = (pid) => tasks.find(t => t.linkedProblem === pid);
 
   const navItems = isEA
     ? [{ key: "dashboard", label: "Home", icon: "\u{1F4CA}" },
@@ -755,6 +786,7 @@ function Dashboard({ session, onLogout }) {
                         <div style={{ fontSize: 12, color: "#9CA3AF" }}>
                           Due: {t.dueDate || "No deadline"}
                           {t.linkedProblem && <span> · Linked: {t.linkedProblem}</span>}
+                          {t.reportedBy && <span> · Reported by: {getName(t.reportedBy)}</span>}
                         </div>
 
                         <ResponseInfo t={t} forEA={false} />
@@ -803,6 +835,8 @@ function Dashboard({ session, onLogout }) {
                             <span style={{ color: "#7C3AED", fontWeight: 600 }}> · Suggested: {p.suggestedName || getName(p.suggestedTo)}</span>
                           )}
                         </div>
+
+                        <ReporterTaskInfo t={taskForProblem(p.id)} />
                       </div>
                     ))}
                   </div>
@@ -883,6 +917,7 @@ function Dashboard({ session, onLogout }) {
                           <span>{"\u{1F464}"} {t.assigneeName || t.assignedTo}</span>
                           <span>Due: {t.dueDate || "\u{2014}"}</span>
                           {t.linkedProblem && <span>Linked: {t.linkedProblem}</span>}
+                          {t.reportedBy && <span>Reported by: {getName(t.reportedBy)}</span>}
                           <span>Created: {t.createdDate}</span>
                         </div>
 
