@@ -496,8 +496,8 @@ function Dashboard({ session, onLogout }) {
   // Tasks actually assigned to me (the list also carries tasks raised from my entries)
   const myTasks = isEA ? tasks : tasks.filter(t => sameMail(t.assignedTo, session.email));
   const myProblems = problems;
-  // Task raised from one of my entries
-  const taskForProblem = (pid) => tasks.find(t => t.linkedProblem === pid);
+  // Every task raised from one of my entries — an entry can have more than one
+  const tasksForProblem = (pid) => tasks.filter(t => t.linkedProblem === pid);
 
   const navItems = isEA
     ? [{ key: "dashboard", label: "Home", icon: "\u{1F4CA}" },
@@ -836,7 +836,7 @@ function Dashboard({ session, onLogout }) {
                           )}
                         </div>
 
-                        <ReporterTaskInfo t={taskForProblem(p.id)} />
+                        {tasksForProblem(p.id).map(t => <ReporterTaskInfo key={t.id} t={t} />)}
                       </div>
                     ))}
                   </div>
