@@ -362,7 +362,6 @@ function Dashboard({ session, onLogout }) {
   const [notification, setNotification] = useState(null);
   const [problemForm, setProblemForm] = useState({ title: "", category: "General Issue", type: "Issue", description: "", suggestedTo: "", dueDate: "" });
   const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
-  const [prefilledFrom, setPrefilledFrom] = useState("");
   const [respond, setRespond] = useState(null);       // task being accepted
   const [respForm, setRespForm] = useState({ promisedDate: "", note: "" });
   const [changing, setChanging] = useState(null);     // task whose person the EA is changing
@@ -434,7 +433,6 @@ function Dashboard({ session, onLogout }) {
       if (result.success) {
         assignedName = result.task?.assigneeName || "employee";
         setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
-        setPrefilledFrom("");
       } else { notify(result.error, true); }
     } catch (err) { notify(err.message || "Failed to assign", true); }
     setSaving(false);
@@ -511,7 +509,8 @@ function Dashboard({ session, onLogout }) {
     onLogout();
   };
 
-  const openProblems = problems.filter(p => p.status === "Open");
+  // Entries nobody was named on — only these ever need the EA
+  const unassignedProblems = problems.filter(p => p.status === "Open" && !p.suggestedTo);
   // Tasks actually assigned to me (the list also carries tasks raised from my entries)
   const myTasks = isEA ? tasks : tasks.filter(t => sameMail(t.assignedTo, session.email));
   const myProblems = problems;
@@ -544,6 +543,12 @@ function Dashboard({ session, onLogout }) {
 
   // Everyone in the Employees sheet except yourself — EA and Owner included
   const suggestableEmployees = employees.filter(e => e.email !== session.email);
+
+  // ── Recent Activity rows (entries + tasks, newest first, with full detail) ──
+  const activity = [
+    ...myProblems.map(p => ({ kind: "problem", data: p, date: p.date })),
+    ...myTasks.map(t => ({ kind: "task", data: t, date: t.createdDate }))
+  ].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 8);
 
   return (
     <div style={{ minHeight: "100vh" }}>
@@ -685,7 +690,7 @@ function Dashboard({ session, onLogout }) {
               <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>{isEA ? "Everything reported and assigned across the office" : "Your tasks and reported entries"}</p>
 
               <div className="stat-row" style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 24 }}>
-                <StatCard label={isEA ? "Open Entries" : "My Entries"} value={isEA ? openProblems.length : myProblems.length} color="#8B5CF6" icon={"\u{1F514}"} />
+                <StatCard label={isEA ? "Need Assigning" : "My Entries"} value={isEA ? unassignedProblems.length : myProblems.length} color="#8B5CF6" icon={"\u{1F514}"} />
                 <StatCard label={isEA ? "Total Tasks" : "My Tasks"} value={myTasks.length} color="#2D5BFF" icon={"\u{1F4CC}"} />
                 <StatCard label="In Progress" value={myTasks.filter(t => t.status === "In Progress").length} color="#F59E0B" icon={"\u{23F3}"} />
                 <StatCard label="Completed" value={myTasks.filter(t => t.status === "Completed").length} color="#10B981" icon={"\u{2705}"} />
@@ -693,28 +698,69 @@ function Dashboard({ session, onLogout }) {
 
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", overflow: "hidden" }}>
                 <div style={{ padding: "14px 18px", borderBottom: "1px solid #F3F4F6", fontWeight: 700, fontSize: 14.5 }}>Recent Activity</div>
-                {[...myProblems.slice(0, 4).map(p => ({ kind: "problem", data: p, date: p.date })),
-                  ...myTasks.slice(0, 4).map(t => ({ kind: "task", data: t, date: t.createdDate }))]
-                  .sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 6)
-                  .map((item, i) => (
-                    <div key={i} style={{ padding: "13px 18px", borderBottom: "1px solid #F9FAFB", display: "flex", alignItems: "flex-start", gap: 12 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: "50%", marginTop: 6, background: item.kind === "problem" ? "#8B5CF6" : "#2D5BFF", flexShrink: 0 }} />
+                {activity.map((item, i) => {
+                  const d = item.data;
+                  const isProblem = item.kind === "problem";
+                  return (
+                    <div key={i} style={{ padding: "15px 18px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "flex-start", gap: 12 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", marginTop: 7, background: isProblem ? "#8B5CF6" : "#2D5BFF", flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 600 }}>
-                          <span style={{ color: "#9CA3AF", marginRight: 7, fontFamily: "monospace", fontSize: 12 }}>{item.data.id}</span>
-                          {item.data.title}
+                        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, flexWrap: "wrap" }}>
+                          <span style={{ color: "#9CA3AF", fontFamily: "monospace", fontSize: 12 }}>{d.id}</span>
+                          {isProblem && d.category && <Badge text={d.category} color="#6B7280" />}
+                          {d.type && <Badge text={d.type} color={typeColor(d.type)} />}
+                          <Badge text={d.status} color={statusColor(d.status)} />
                         </div>
-                        <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 3 }}>
-                          {item.kind === "problem" ? "Reported" : `To ${item.data.assigneeName || item.data.assignedTo}`} · {item.date}
+
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>{d.title}</div>
+                        {d.description && (
+                          <div style={{ fontSize: 12.5, color: "#6B7280", marginTop: 4, lineHeight: 1.55 }}>{d.description}</div>
+                        )}
+
+                        <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 6, lineHeight: 1.7 }}>
+                          {isProblem ? (
+                            <>
+                              Reported on {d.date}
+                              {d.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}> · Due: {d.dueDate}</span>}
+                              {(d.suggestedName || d.suggestedTo) && (
+                                <span style={{ color: "#7C3AED", fontWeight: 600 }}> · Sent to: {d.suggestedName || getName(d.suggestedTo)}</span>
+                              )}
+                              {isEA && <span> · By {getName(d.reportedBy)}</span>}
+                            </>
+                          ) : (
+                            <>
+                              {"\u{1F464}"} {d.assigneeName || d.assignedTo} · Assigned on {d.createdDate}
+                              {d.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}> · Due: {d.dueDate}</span>}
+                              {d.reportedBy && <span> · From: {getName(d.reportedBy)}</span>}
+                              {d.linkedProblem && <span> · Linked: {d.linkedProblem}</span>}
+                            </>
+                          )}
                         </div>
-                        <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                          <Badge text={item.data.status} color={statusColor(item.data.status)} />
-                          {item.data.type && <Badge text={item.data.type} color={typeColor(item.data.type)} />}
-                        </div>
+
+                        {!isProblem && d.response && (
+                          <div style={{ fontSize: 12, color: "#0E7490", marginTop: 5, lineHeight: 1.7 }}>
+                            {"\u2713"} Accepted — will complete by <strong>{d.promisedDate || "\u2014"}</strong>
+                            {d.responseNote && <span> · Note: {d.responseNote}</span>}
+                            {d.respondedOn && <span style={{ opacity: 0.8 }}> · Responded {d.respondedOn}</span>}
+                          </div>
+                        )}
+                        {!isProblem && d.completedAt && (
+                          <div style={{ fontSize: 12, color: "#15803D", fontWeight: 600, marginTop: 4 }}>
+                            {"\u2705"} Completed on {d.completedAt}
+                          </div>
+                        )}
+                        {isProblem && tasksForProblem(d.id).map(t => (
+                          <div key={t.id} style={{ fontSize: 12, color: "#334155", marginTop: 5, lineHeight: 1.7 }}>
+                            {"\u{1F4CC}"} {t.id} with {t.assigneeName || t.assignedTo} · <span style={{ color: statusColor(t.status), fontWeight: 600 }}>{t.status}</span>
+                            {t.promisedDate && <span> · will complete by <strong>{t.promisedDate}</strong></span>}
+                            {t.completedAt && <span style={{ color: "#15803D", fontWeight: 600 }}> · done {t.completedAt}</span>}
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  ))}
-                {myProblems.length === 0 && myTasks.length === 0 && (
+                  );
+                })}
+                {activity.length === 0 && (
                   <div style={{ padding: 30, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No activity yet</div>
                 )}
               </div>
@@ -885,7 +931,7 @@ function Dashboard({ session, onLogout }) {
           {view === "problems" && isEA && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>All Entries</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Only entries with nobody named need your assignment · <strong>{openProblems.length} open</strong></p>
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Only entries with nobody named need you · <strong>{unassignedProblems.length} waiting</strong></p>
               {problems.length === 0
                 ? <EmptyState icon={"\u{1F4CB}"} title="Nothing reported yet" />
                 : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -901,27 +947,35 @@ function Dashboard({ session, onLogout }) {
                         <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{p.title}</div>
                         {p.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{p.description}</div>}
                         <div style={{ fontSize: 12, color: "#9CA3AF" }}>
-                          By {p.reportedBy} · {p.date}
+                          By {getName(p.reportedBy)} · {p.date}
                           {p.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}> · Due: {p.dueDate}</span>}
                         </div>
 
-                        {p.status === "Open" && (
+                        {tasksForProblem(p.id).map(t => (
+                          <div key={t.id} style={{ fontSize: 12.5, color: "#334155", marginTop: 8, lineHeight: 1.7 }}>
+                            {"\u{1F4CC}"} {t.id} with {t.assigneeName || t.assignedTo} · <span style={{ color: statusColor(t.status), fontWeight: 600 }}>{t.status}</span>
+                            {t.promisedDate && <span> · will complete by <strong>{t.promisedDate}</strong></span>}
+                            {t.completedAt && <span style={{ color: "#15803D", fontWeight: 600 }}> · done {t.completedAt}</span>}
+                          </div>
+                        ))}
+
+                        {/* Only entries where nobody was named ever need the EA */}
+                        {p.status === "Open" && !p.suggestedTo && (
                           <button className="act" style={{ ...btnP, background: "#7C3AED", fontSize: 13.5, padding: "11px 16px", marginTop: 14 }}
                             onClick={() => {
                               setTaskForm(f => ({
                                 ...f, title: p.title, description: p.description,
                                 linkedProblem: p.id, type: TYPES.includes(p.type) ? p.type : "Task",
-                                assignedTo: p.suggestedTo || "", dueDate: p.dueDate || ""
+                                assignedTo: "", dueDate: p.dueDate || ""
                               }));
-                              setPrefilledFrom("");
                               setView("assign");
                             }}>
                             Assign Task {"\u{2192}"}
                           </button>
                         )}
-                        {p.status !== "Open" && (
-                          <div style={{ fontSize: 12.5, color: statusColor(p.status), fontWeight: 600, marginTop: 10 }}>
-                            {p.status === "Assigned" ? "\u{23F3} Task assigned" : p.status === "Resolved" ? "\u{2705} Resolved" : p.status}
+                        {p.status === "Open" && p.suggestedTo && (
+                          <div style={{ fontSize: 12.5, color: "#7C3AED", fontWeight: 600, marginTop: 10 }}>
+                            {"\u{1F464}"} Sent directly to {p.suggestedName || getName(p.suggestedTo)}
                           </div>
                         )}
                       </div>
@@ -939,7 +993,7 @@ function Dashboard({ session, onLogout }) {
                   <h2 style={{ margin: 0, fontSize: 21, fontWeight: 700 }}>All Tasks</h2>
                   <p style={{ margin: "5px 0 0", color: "#6B7280", fontSize: 13.5 }}>Who accepted, by when — and change the person any time</p>
                 </div>
-                <button className="act" style={btnP} onClick={() => { setPrefilledFrom(""); setView("assign"); }}>{"\u{2795}"} New Task</button>
+                <button className="act" style={btnP} onClick={() => setView("assign")}>{"\u{2795}"} New Task</button>
               </div>
               {tasks.length === 0
                 ? <EmptyState icon={"\u{1F4CC}"} title="No tasks created yet" subtitle='Use "Assign" to create one' />
@@ -1036,18 +1090,17 @@ function Dashboard({ session, onLogout }) {
                         setTaskForm(f => ({
                           ...f,
                           linkedProblem: pid,
-                          assignedTo: (linked && linked.suggestedTo) ? linked.suggestedTo : f.assignedTo,
                           dueDate: (linked && linked.dueDate) ? linked.dueDate : f.dueDate
                         }));
                       }}>
                       <option value="">{"\u{2014}"} None {"\u{2014}"}</option>
-                      {problems.filter(p => p.status === "Open").map(p => <option key={p.id} value={p.id}>{p.id}: {p.title}</option>)}
+                      {unassignedProblems.map(p => <option key={p.id} value={p.id}>{p.id}: {p.title}</option>)}
                     </select>
                   </div>
                 </div>
                 <div className="act-row" style={{ display: "flex", gap: 10 }}>
                   <button className="act" style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitTask} disabled={saving}>Assign Task</button>
-                  <button className="act" style={btnS} onClick={() => { setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" }); setPrefilledFrom(""); }}>Clear</button>
+                  <button className="act" style={btnS} onClick={() => setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" })}>Clear</button>
                 </div>
               </div>
             </div>
