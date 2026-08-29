@@ -82,6 +82,13 @@ const TYPES = ["Issue", "Task", "Request", "Complaint"];
 // A Complaint carries no due date
 const needsDue = (type) => type !== "Complaint";
 
+// "Ms. Pooja" → "Pooja" (drops the honorific so greetings read naturally)
+const firstName = (n) => {
+  const parts = String(n || "").trim().split(/\s+/)
+    .filter(p => !/^(mr|mrs|ms|miss|dr|shri|smt)\.?$/i.test(p));
+  return parts[0] || String(n || "");
+};
+
 const typeColor = (t) => ({ Issue: "#EF4444", Task: "#2563EB", Request: "#0891B2", Complaint: "#F59E0B" }[t] || "#6B7280");
 const statusColor = (s) => ({
   Open: "#8B5CF6", Assigned: "#2563EB", Pending: "#8B5CF6", Accepted: "#0891B2",
@@ -391,24 +398,28 @@ function Dashboard({ session, onLogout }) {
 
   useEffect(() => { refreshData(); }, [refreshData]);
 
-  // ── Submit Problem ──
+  // ── Submit Problem ── (with a person chosen it goes straight to them)
   const submitProblem = async () => {
     if (!problemForm.title.trim()) { notify("Please enter a title", true); return; }
     if (needsDue(problemForm.type) && problemForm.suggestedTo && !problemForm.dueDate) {
       notify("Please give a due date for that person", true); return;
     }
     setSaving(true);
-    let saved = false;
+    let sentTo = null;   // "" when nobody was chosen, name when it went straight to someone
     try {
       const result = await api('addProblem', { email: session.email, ...problemForm });
       if (result.success) {
-        saved = true;
+        sentTo = result.assigneeName || "";
         setProblemForm({ title: "", category: "General Issue", type: "Issue", description: "", suggestedTo: "", dueDate: "" });
       } else { notify(result.error, true); }
     } catch (err) { notify(err.message || "Failed to submit", true); }
     setSaving(false);
 
-    if (saved) { await refreshData(); notify("Saved successfully!"); setView("myproblems"); }
+    if (sentTo !== null) {
+      await refreshData();
+      notify(sentTo ? "Sent directly to " + sentTo : "Saved — the EA will assign it");
+      setView("myproblems");
+    }
   };
 
   // ── Submit Task ──
@@ -454,7 +465,7 @@ function Dashboard({ session, onLogout }) {
     } catch (err) { notify(err.message || "Failed to send response", true); }
     setSaving(false);
 
-    if (ok) { await refreshData(); notify("Accepted — EA has been informed"); }
+    if (ok) { await refreshData(); notify("Accepted — date sent"); }
   };
 
   // ── EA changes the assigned person ──
@@ -670,7 +681,7 @@ function Dashboard({ session, onLogout }) {
           {/* ═══ DASHBOARD ═══ */}
           {view === "dashboard" && (
             <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>{isEA ? "EA Dashboard" : `Hi, ${String(user.name).split(" ")[0]}`}</h2>
+              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>{isEA ? "EA Dashboard" : `Hi, ${firstName(user.name)}`}</h2>
               <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>{isEA ? "Everything reported and assigned across the office" : "Your tasks and reported entries"}</p>
 
               <div className="stat-row" style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 24 }}>
@@ -735,7 +746,7 @@ function Dashboard({ session, onLogout }) {
           {view === "report" && !isEA && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>Report a Problem</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Issue, request or complaint — pick the person and the date you need it by</p>
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Pick the person and it goes straight to them</p>
               <div className="card" style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 24, maxWidth: 600 }}>
                 <div style={{ marginBottom: 16 }}>
                   <label style={lbl}>Title *</label>
@@ -763,9 +774,9 @@ function Dashboard({ session, onLogout }) {
                   <label style={lbl}>Description</label>
                   <textarea style={{ ...inp, minHeight: 96, resize: "vertical" }} placeholder="Describe it in detail..." value={problemForm.description} onChange={e => setProblemForm(f => ({ ...f, description: e.target.value }))} />
                 </div>
-                <div className="form-row" style={{ display: "flex", gap: 14, marginBottom: 20 }}>
+                <div className="form-row" style={{ display: "flex", gap: 14, marginBottom: 14 }}>
                   <div style={{ flex: 1 }}>
-                    <label style={lbl}>{"\u{1F464}"} Suggest Person (optional)</label>
+                    <label style={lbl}>{"\u{1F464}"} Assign To</label>
                     <select style={inp} value={problemForm.suggestedTo} onChange={e => setProblemForm(f => ({ ...f, suggestedTo: e.target.value }))}>
                       <option value="">{"\u2014"} Let the EA decide {"\u2014"}</option>
                       {suggestableEmployees.map(e => <option key={e.email} value={e.email}>{e.name} — {e.dept}</option>)}
@@ -780,9 +791,10 @@ function Dashboard({ session, onLogout }) {
                   )}
                 </div>
                 <div style={{ fontSize: 11.5, color: "#9CA3AF", marginBottom: 20, lineHeight: 1.5 }}>
-                  {needsDue(problemForm.type)
-                    ? "किसी particular person का काम है तो नाम चुनें और कब तक चाहिए वो date दें."
-                    : "Complaint में due date नहीं लगती."}
+                  {problemForm.suggestedTo
+                    ? "Submit करते ही ये task सीधे उस व्यक्ति के My Tasks में चला जाएगा."
+                    : "किसी को नहीं चुना तो entry EA के पास जाएगी और वो assign करेंगी."}
+                  {!needsDue(problemForm.type) && " Complaint में due date नहीं लगती."}
                 </div>
                 <button className="act" style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitProblem} disabled={saving}>Submit</button>
               </div>
@@ -795,7 +807,7 @@ function Dashboard({ session, onLogout }) {
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>My Tasks</h2>
               <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Accept each task with the date you'll finish it by</p>
               {myTasks.length === 0
-                ? <EmptyState icon={"\u{1F4ED}"} title="No tasks assigned yet" subtitle="Tasks assigned to you will appear here" />
+                ? <EmptyState icon={"\u{1F4ED}"} title="No tasks assigned yet" subtitle="Tasks sent to you will appear here" />
                 : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     {myTasks.map(t => (
                       <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : "#E5E7EB"}`, padding: 18 }}>
@@ -809,8 +821,8 @@ function Dashboard({ session, onLogout }) {
                         <div style={{ fontSize: 12, color: "#9CA3AF" }}>
                           {t.dueDate ? <span style={{ color: "#B45309", fontWeight: 600 }}>Due: {t.dueDate} · </span> : null}
                           Assigned on {t.createdDate}
+                          {t.reportedBy && <span> · From: {getName(t.reportedBy)}</span>}
                           {t.linkedProblem && <span> · Linked: {t.linkedProblem}</span>}
-                          {t.reportedBy && <span> · Reported by: {getName(t.reportedBy)}</span>}
                         </div>
 
                         <ResponseInfo t={t} forEA={false} />
@@ -857,7 +869,7 @@ function Dashboard({ session, onLogout }) {
                           Reported on {p.date}
                           {p.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}> · Due: {p.dueDate}</span>}
                           {(p.suggestedName || p.suggestedTo) && (
-                            <span style={{ color: "#7C3AED", fontWeight: 600 }}> · Suggested: {p.suggestedName || getName(p.suggestedTo)}</span>
+                            <span style={{ color: "#7C3AED", fontWeight: 600 }}> · Sent to: {p.suggestedName || getName(p.suggestedTo)}</span>
                           )}
                         </div>
 
@@ -873,7 +885,7 @@ function Dashboard({ session, onLogout }) {
           {view === "problems" && isEA && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>All Entries</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Review and assign · <strong>{openProblems.length} open</strong></p>
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Only entries with nobody named need your assignment · <strong>{openProblems.length} open</strong></p>
               {problems.length === 0
                 ? <EmptyState icon={"\u{1F4CB}"} title="Nothing reported yet" />
                 : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -897,11 +909,11 @@ function Dashboard({ session, onLogout }) {
                           <button className="act" style={{ ...btnP, background: "#7C3AED", fontSize: 13.5, padding: "11px 16px", marginTop: 14 }}
                             onClick={() => {
                               setTaskForm(f => ({
-                                ...f, title: `Resolve: ${p.title}`, description: p.description,
+                                ...f, title: p.title, description: p.description,
                                 linkedProblem: p.id, type: TYPES.includes(p.type) ? p.type : "Task",
                                 assignedTo: p.suggestedTo || "", dueDate: p.dueDate || ""
                               }));
-                              setPrefilledFrom(p.suggestedTo ? (p.suggestedName || getName(p.suggestedTo)) : "");
+                              setPrefilledFrom("");
                               setView("assign");
                             }}>
                             Assign Task {"\u{2192}"}
@@ -944,8 +956,8 @@ function Dashboard({ session, onLogout }) {
                         <div style={{ display: "flex", gap: 14, fontSize: 12, color: "#9CA3AF", flexWrap: "wrap" }}>
                           <span>{"\u{1F464}"} {t.assigneeName || t.assignedTo}</span>
                           {t.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}>Due: {t.dueDate}</span>}
+                          {t.reportedBy && <span>From: {getName(t.reportedBy)}</span>}
                           {t.linkedProblem && <span>Linked: {t.linkedProblem}</span>}
-                          {t.reportedBy && <span>Reported by: {getName(t.reportedBy)}</span>}
                           <span>Created: {t.createdDate}</span>
                         </div>
 
@@ -979,11 +991,6 @@ function Dashboard({ session, onLogout }) {
                 {taskForm.linkedProblem && (
                   <div style={{ background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 9, padding: "10px 13px", marginBottom: 16, fontSize: 12.5, color: "#4338CA", lineHeight: 1.55 }}>
                     {"\u{1F517}"} Linked to entry <strong>{taskForm.linkedProblem}</strong> — completing it will auto-resolve the entry
-                  </div>
-                )}
-                {prefilledFrom && (
-                  <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 9, padding: "10px 13px", marginBottom: 16, fontSize: 12.5, color: "#6D28D9", lineHeight: 1.55 }}>
-                    {"\u{1F464}"} Reporter suggested <strong>{prefilledFrom}</strong> — already selected. Change it if someone else should handle it.
                   </div>
                 )}
                 <div style={{ marginBottom: 16 }}>
@@ -1032,7 +1039,6 @@ function Dashboard({ session, onLogout }) {
                           assignedTo: (linked && linked.suggestedTo) ? linked.suggestedTo : f.assignedTo,
                           dueDate: (linked && linked.dueDate) ? linked.dueDate : f.dueDate
                         }));
-                        setPrefilledFrom(linked && linked.suggestedTo ? (linked.suggestedName || getName(linked.suggestedTo)) : "");
                       }}>
                       <option value="">{"\u{2014}"} None {"\u{2014}"}</option>
                       {problems.filter(p => p.status === "Open").map(p => <option key={p.id} value={p.id}>{p.id}: {p.title}</option>)}
