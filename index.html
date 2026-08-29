@@ -350,7 +350,7 @@ function Dashboard({ session, onLogout }) {
   const [saving, setSaving] = useState(false);
   const [notification, setNotification] = useState(null);
   const [problemForm, setProblemForm] = useState({ title: "", category: "General Issue", type: "Issue", description: "", suggestedTo: "" });
-  const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
+  const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "", type: "Task", linkedProblem: "" });
   const [prefilledFrom, setPrefilledFrom] = useState("");
   const [respond, setRespond] = useState(null);       // task being accepted
   const [respForm, setRespForm] = useState({ promisedDate: "", note: "" });
@@ -414,7 +414,7 @@ function Dashboard({ session, onLogout }) {
       const result = await api('addTask', { email: session.email, ...taskForm });
       if (result.success) {
         assignedName = result.task?.assigneeName || "employee";
-        setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
+        setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", linkedProblem: "" });
         setPrefilledFrom("");
       } else { notify(result.error, true); }
     } catch (err) { notify(err.message || "Failed to assign", true); }
@@ -557,7 +557,6 @@ function Dashboard({ session, onLogout }) {
             <label style={lbl}>I will complete it by *</label>
             <input type="date" style={inp} value={respForm.promisedDate}
               onChange={e => setRespForm(f => ({ ...f, promisedDate: e.target.value }))} />
-            {respond.dueDate && <div style={{ fontSize: 11.5, color: "#9CA3AF", marginTop: 5 }}>EA's due date: {respond.dueDate}</div>}
           </div>
           <div style={{ marginBottom: 20 }}>
             <label style={lbl}>Note for EA (optional)</label>
@@ -784,7 +783,7 @@ function Dashboard({ session, onLogout }) {
                         <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{t.title}</div>
                         {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{t.description}</div>}
                         <div style={{ fontSize: 12, color: "#9CA3AF" }}>
-                          Due: {t.dueDate || "No deadline"}
+                          Assigned on {t.createdDate}
                           {t.linkedProblem && <span> · Linked: {t.linkedProblem}</span>}
                           {t.reportedBy && <span> · Reported by: {getName(t.reportedBy)}</span>}
                         </div>
@@ -915,7 +914,6 @@ function Dashboard({ session, onLogout }) {
                         {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{t.description}</div>}
                         <div style={{ display: "flex", gap: 14, fontSize: 12, color: "#9CA3AF", flexWrap: "wrap" }}>
                           <span>{"\u{1F464}"} {t.assigneeName || t.assignedTo}</span>
-                          <span>Due: {t.dueDate || "\u{2014}"}</span>
                           {t.linkedProblem && <span>Linked: {t.linkedProblem}</span>}
                           {t.reportedBy && <span>Reported by: {getName(t.reportedBy)}</span>}
                           <span>Created: {t.createdDate}</span>
@@ -946,7 +944,7 @@ function Dashboard({ session, onLogout }) {
           {view === "assign" && isEA && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>Assign New Task</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>The employee accepts it with the date they'll finish by</p>
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>The employee gives their own completion date when they accept</p>
               <div className="card" style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 24, maxWidth: 600 }}>
                 {taskForm.linkedProblem && (
                   <div style={{ background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 9, padding: "10px 13px", marginBottom: 16, fontSize: 12.5, color: "#4338CA", lineHeight: 1.55 }}>
@@ -981,28 +979,22 @@ function Dashboard({ session, onLogout }) {
                     </select>
                   </div>
                 </div>
-                <div className="form-row" style={{ display: "flex", gap: 14, marginBottom: 20 }}>
-                  <div style={{ flex: 1, minWidth: 150 }}>
-                    <label style={lbl}>Due Date</label>
-                    <input type="date" style={inp} value={taskForm.dueDate} onChange={e => setTaskForm(f => ({ ...f, dueDate: e.target.value }))} />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 150 }}>
-                    <label style={lbl}>Link to Entry</label>
-                    <select style={inp} value={taskForm.linkedProblem}
-                      onChange={e => {
-                        const pid = e.target.value;
-                        const linked = problems.find(p => p.id === pid);
-                        setTaskForm(f => ({ ...f, linkedProblem: pid, assignedTo: (linked && linked.suggestedTo) ? linked.suggestedTo : f.assignedTo }));
-                        setPrefilledFrom(linked && linked.suggestedTo ? (linked.suggestedName || getName(linked.suggestedTo)) : "");
-                      }}>
-                      <option value="">{"\u{2014}"} None {"\u{2014}"}</option>
-                      {problems.filter(p => p.status === "Open").map(p => <option key={p.id} value={p.id}>{p.id}: {p.title}</option>)}
-                    </select>
-                  </div>
+                <div style={{ marginBottom: 20 }}>
+                  <label style={lbl}>Link to Entry</label>
+                  <select style={inp} value={taskForm.linkedProblem}
+                    onChange={e => {
+                      const pid = e.target.value;
+                      const linked = problems.find(p => p.id === pid);
+                      setTaskForm(f => ({ ...f, linkedProblem: pid, assignedTo: (linked && linked.suggestedTo) ? linked.suggestedTo : f.assignedTo }));
+                      setPrefilledFrom(linked && linked.suggestedTo ? (linked.suggestedName || getName(linked.suggestedTo)) : "");
+                    }}>
+                    <option value="">{"\u{2014}"} None {"\u{2014}"}</option>
+                    {problems.filter(p => p.status === "Open").map(p => <option key={p.id} value={p.id}>{p.id}: {p.title}</option>)}
+                  </select>
                 </div>
                 <div className="act-row" style={{ display: "flex", gap: 10 }}>
                   <button className="act" style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitTask} disabled={saving}>Assign Task</button>
-                  <button className="act" style={btnS} onClick={() => { setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" }); setPrefilledFrom(""); }}>Clear</button>
+                  <button className="act" style={btnS} onClick={() => { setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", linkedProblem: "" }); setPrefilledFrom(""); }}>Clear</button>
                 </div>
               </div>
             </div>
