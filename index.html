@@ -79,6 +79,9 @@ const CONFIG = {
 const CATEGORIES = ["General Issue", "IT / Computer", "Maintenance", "Follow-up", "Other"];
 const TYPES = ["Issue", "Task", "Request", "Complaint"];
 
+// A Complaint carries no due date
+const needsDue = (type) => type !== "Complaint";
+
 const typeColor = (t) => ({ Issue: "#EF4444", Task: "#2563EB", Request: "#0891B2", Complaint: "#F59E0B" }[t] || "#6B7280");
 const statusColor = (s) => ({
   Open: "#8B5CF6", Assigned: "#2563EB", Pending: "#8B5CF6", Accepted: "#0891B2",
@@ -243,6 +246,7 @@ function ReporterTaskInfo({ t }) {
       <div style={{ fontWeight: 700, color: "#0F172A" }}>
         {"\u{1F4CC}"} {t.id} · with {t.assigneeName || t.assignedTo}
       </div>
+      {t.dueDate && <div style={{ marginTop: 3 }}>Due date given: <strong>{t.dueDate}</strong></div>}
       {t.response
         ? <>
             <div style={{ marginTop: 3 }}>Accepted — will complete by <strong>{t.promisedDate || "—"}</strong></div>
@@ -349,8 +353,8 @@ function Dashboard({ session, onLogout }) {
   const [loadError, setLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [notification, setNotification] = useState(null);
-  const [problemForm, setProblemForm] = useState({ title: "", category: "General Issue", type: "Issue", description: "", suggestedTo: "" });
-  const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "", type: "Task", linkedProblem: "" });
+  const [problemForm, setProblemForm] = useState({ title: "", category: "General Issue", type: "Issue", description: "", suggestedTo: "", dueDate: "" });
+  const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
   const [prefilledFrom, setPrefilledFrom] = useState("");
   const [respond, setRespond] = useState(null);       // task being accepted
   const [respForm, setRespForm] = useState({ promisedDate: "", note: "" });
@@ -390,13 +394,16 @@ function Dashboard({ session, onLogout }) {
   // ── Submit Problem ──
   const submitProblem = async () => {
     if (!problemForm.title.trim()) { notify("Please enter a title", true); return; }
+    if (needsDue(problemForm.type) && problemForm.suggestedTo && !problemForm.dueDate) {
+      notify("Please give a due date for that person", true); return;
+    }
     setSaving(true);
     let saved = false;
     try {
       const result = await api('addProblem', { email: session.email, ...problemForm });
       if (result.success) {
         saved = true;
-        setProblemForm({ title: "", category: "General Issue", type: "Issue", description: "", suggestedTo: "" });
+        setProblemForm({ title: "", category: "General Issue", type: "Issue", description: "", suggestedTo: "", dueDate: "" });
       } else { notify(result.error, true); }
     } catch (err) { notify(err.message || "Failed to submit", true); }
     setSaving(false);
@@ -408,13 +415,14 @@ function Dashboard({ session, onLogout }) {
   const submitTask = async () => {
     if (!taskForm.title.trim()) { notify("Please enter a task title", true); return; }
     if (!taskForm.assignedTo) { notify("Please select an employee", true); return; }
+    if (needsDue(taskForm.type) && !taskForm.dueDate) { notify("Please give a due date", true); return; }
     setSaving(true);
     let assignedName = "";
     try {
       const result = await api('addTask', { email: session.email, ...taskForm });
       if (result.success) {
         assignedName = result.task?.assigneeName || "employee";
-        setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", linkedProblem: "" });
+        setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
         setPrefilledFrom("");
       } else { notify(result.error, true); }
     } catch (err) { notify(err.message || "Failed to assign", true); }
@@ -557,9 +565,10 @@ function Dashboard({ session, onLogout }) {
             <label style={lbl}>I will complete it by *</label>
             <input type="date" style={inp} value={respForm.promisedDate}
               onChange={e => setRespForm(f => ({ ...f, promisedDate: e.target.value }))} />
+            {respond.dueDate && <div style={{ fontSize: 11.5, color: "#9CA3AF", marginTop: 5 }}>Due date given to you: {respond.dueDate}</div>}
           </div>
           <div style={{ marginBottom: 20 }}>
-            <label style={lbl}>Note for EA (optional)</label>
+            <label style={lbl}>Note (optional)</label>
             <textarea style={{ ...inp, minHeight: 76, resize: "vertical" }} placeholder="e.g., will start after the dispatch rush"
               value={respForm.note} onChange={e => setRespForm(f => ({ ...f, note: e.target.value }))} />
           </div>
@@ -726,7 +735,7 @@ function Dashboard({ session, onLogout }) {
           {view === "report" && !isEA && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>Report a Problem</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Issue, request or complaint — EA reviews and assigns it</p>
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Issue, request or complaint — pick the person and the date you need it by</p>
               <div className="card" style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 24, maxWidth: 600 }}>
                 <div style={{ marginBottom: 16 }}>
                   <label style={lbl}>Title *</label>
@@ -741,7 +750,11 @@ function Dashboard({ session, onLogout }) {
                   </div>
                   <div style={{ flex: 1 }}>
                     <label style={lbl}>Type</label>
-                    <select style={inp} value={problemForm.type} onChange={e => setProblemForm(f => ({ ...f, type: e.target.value }))}>
+                    <select style={inp} value={problemForm.type}
+                      onChange={e => {
+                        const type = e.target.value;
+                        setProblemForm(f => ({ ...f, type, dueDate: needsDue(type) ? f.dueDate : "" }));
+                      }}>
                       {TYPES.map(t => <option key={t}>{t}</option>)}
                     </select>
                   </div>
@@ -750,15 +763,26 @@ function Dashboard({ session, onLogout }) {
                   <label style={lbl}>Description</label>
                   <textarea style={{ ...inp, minHeight: 96, resize: "vertical" }} placeholder="Describe it in detail..." value={problemForm.description} onChange={e => setProblemForm(f => ({ ...f, description: e.target.value }))} />
                 </div>
-                <div style={{ marginBottom: 20 }}>
-                  <label style={lbl}>{"\u{1F464}"} Suggest Person (optional)</label>
-                  <select style={inp} value={problemForm.suggestedTo} onChange={e => setProblemForm(f => ({ ...f, suggestedTo: e.target.value }))}>
-                    <option value="">{"\u2014"} Let the EA decide {"\u2014"}</option>
-                    {suggestableEmployees.map(e => <option key={e.email} value={e.email}>{e.name} — {e.dept}</option>)}
-                  </select>
-                  <div style={{ fontSize: 11.5, color: "#9CA3AF", marginTop: 5, lineHeight: 1.5 }}>
-                    अगर ये काम किसी particular person का है तो यहाँ नाम चुनें — EA को suggestion दिखेगा.
+                <div className="form-row" style={{ display: "flex", gap: 14, marginBottom: 20 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={lbl}>{"\u{1F464}"} Suggest Person (optional)</label>
+                    <select style={inp} value={problemForm.suggestedTo} onChange={e => setProblemForm(f => ({ ...f, suggestedTo: e.target.value }))}>
+                      <option value="">{"\u2014"} Let the EA decide {"\u2014"}</option>
+                      {suggestableEmployees.map(e => <option key={e.email} value={e.email}>{e.name} — {e.dept}</option>)}
+                    </select>
                   </div>
+                  {needsDue(problemForm.type) && (
+                    <div style={{ flex: 1 }}>
+                      <label style={lbl}>{"\u{1F4C5}"} Due Date {problemForm.suggestedTo ? "*" : ""}</label>
+                      <input type="date" style={inp} value={problemForm.dueDate}
+                        onChange={e => setProblemForm(f => ({ ...f, dueDate: e.target.value }))} />
+                    </div>
+                  )}
+                </div>
+                <div style={{ fontSize: 11.5, color: "#9CA3AF", marginBottom: 20, lineHeight: 1.5 }}>
+                  {needsDue(problemForm.type)
+                    ? "किसी particular person का काम है तो नाम चुनें और कब तक चाहिए वो date दें."
+                    : "Complaint में due date नहीं लगती."}
                 </div>
                 <button className="act" style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitProblem} disabled={saving}>Submit</button>
               </div>
@@ -771,7 +795,7 @@ function Dashboard({ session, onLogout }) {
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>My Tasks</h2>
               <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Accept each task with the date you'll finish it by</p>
               {myTasks.length === 0
-                ? <EmptyState icon={"\u{1F4ED}"} title="No tasks assigned yet" subtitle="Tasks assigned by the EA will appear here" />
+                ? <EmptyState icon={"\u{1F4ED}"} title="No tasks assigned yet" subtitle="Tasks assigned to you will appear here" />
                 : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     {myTasks.map(t => (
                       <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : "#E5E7EB"}`, padding: 18 }}>
@@ -783,6 +807,7 @@ function Dashboard({ session, onLogout }) {
                         <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{t.title}</div>
                         {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{t.description}</div>}
                         <div style={{ fontSize: 12, color: "#9CA3AF" }}>
+                          {t.dueDate ? <span style={{ color: "#B45309", fontWeight: 600 }}>Due: {t.dueDate} · </span> : null}
                           Assigned on {t.createdDate}
                           {t.linkedProblem && <span> · Linked: {t.linkedProblem}</span>}
                           {t.reportedBy && <span> · Reported by: {getName(t.reportedBy)}</span>}
@@ -830,6 +855,7 @@ function Dashboard({ session, onLogout }) {
                         {p.description && <div style={{ fontSize: 13, color: "#6B7280", lineHeight: 1.55 }}>{p.description}</div>}
                         <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 7 }}>
                           Reported on {p.date}
+                          {p.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}> · Due: {p.dueDate}</span>}
                           {(p.suggestedName || p.suggestedTo) && (
                             <span style={{ color: "#7C3AED", fontWeight: 600 }}> · Suggested: {p.suggestedName || getName(p.suggestedTo)}</span>
                           )}
@@ -862,7 +888,10 @@ function Dashboard({ session, onLogout }) {
                         </div>
                         <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{p.title}</div>
                         {p.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{p.description}</div>}
-                        <div style={{ fontSize: 12, color: "#9CA3AF" }}>By {p.reportedBy} · {p.date}</div>
+                        <div style={{ fontSize: 12, color: "#9CA3AF" }}>
+                          By {p.reportedBy} · {p.date}
+                          {p.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}> · Due: {p.dueDate}</span>}
+                        </div>
 
                         {p.status === "Open" && (
                           <button className="act" style={{ ...btnP, background: "#7C3AED", fontSize: 13.5, padding: "11px 16px", marginTop: 14 }}
@@ -870,7 +899,7 @@ function Dashboard({ session, onLogout }) {
                               setTaskForm(f => ({
                                 ...f, title: `Resolve: ${p.title}`, description: p.description,
                                 linkedProblem: p.id, type: TYPES.includes(p.type) ? p.type : "Task",
-                                assignedTo: p.suggestedTo || ""
+                                assignedTo: p.suggestedTo || "", dueDate: p.dueDate || ""
                               }));
                               setPrefilledFrom(p.suggestedTo ? (p.suggestedName || getName(p.suggestedTo)) : "");
                               setView("assign");
@@ -914,6 +943,7 @@ function Dashboard({ session, onLogout }) {
                         {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{t.description}</div>}
                         <div style={{ display: "flex", gap: 14, fontSize: 12, color: "#9CA3AF", flexWrap: "wrap" }}>
                           <span>{"\u{1F464}"} {t.assigneeName || t.assignedTo}</span>
+                          {t.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}>Due: {t.dueDate}</span>}
                           {t.linkedProblem && <span>Linked: {t.linkedProblem}</span>}
                           {t.reportedBy && <span>Reported by: {getName(t.reportedBy)}</span>}
                           <span>Created: {t.createdDate}</span>
@@ -944,7 +974,7 @@ function Dashboard({ session, onLogout }) {
           {view === "assign" && isEA && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>Assign New Task</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>The employee gives their own completion date when they accept</p>
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Give the person the task and the date you need it by</p>
               <div className="card" style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 24, maxWidth: 600 }}>
                 {taskForm.linkedProblem && (
                   <div style={{ background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 9, padding: "10px 13px", marginBottom: 16, fontSize: 12.5, color: "#4338CA", lineHeight: 1.55 }}>
@@ -974,27 +1004,44 @@ function Dashboard({ session, onLogout }) {
                   </div>
                   <div style={{ flex: 1, minWidth: 150 }}>
                     <label style={lbl}>Type</label>
-                    <select style={inp} value={taskForm.type} onChange={e => setTaskForm(f => ({ ...f, type: e.target.value }))}>
+                    <select style={inp} value={taskForm.type}
+                      onChange={e => {
+                        const type = e.target.value;
+                        setTaskForm(f => ({ ...f, type, dueDate: needsDue(type) ? f.dueDate : "" }));
+                      }}>
                       {TYPES.map(t => <option key={t}>{t}</option>)}
                     </select>
                   </div>
                 </div>
-                <div style={{ marginBottom: 20 }}>
-                  <label style={lbl}>Link to Entry</label>
-                  <select style={inp} value={taskForm.linkedProblem}
-                    onChange={e => {
-                      const pid = e.target.value;
-                      const linked = problems.find(p => p.id === pid);
-                      setTaskForm(f => ({ ...f, linkedProblem: pid, assignedTo: (linked && linked.suggestedTo) ? linked.suggestedTo : f.assignedTo }));
-                      setPrefilledFrom(linked && linked.suggestedTo ? (linked.suggestedName || getName(linked.suggestedTo)) : "");
-                    }}>
-                    <option value="">{"\u{2014}"} None {"\u{2014}"}</option>
-                    {problems.filter(p => p.status === "Open").map(p => <option key={p.id} value={p.id}>{p.id}: {p.title}</option>)}
-                  </select>
+                <div className="form-row" style={{ display: "flex", gap: 14, marginBottom: 20 }}>
+                  {needsDue(taskForm.type) && (
+                    <div style={{ flex: 1, minWidth: 150 }}>
+                      <label style={lbl}>{"\u{1F4C5}"} Due Date *</label>
+                      <input type="date" style={inp} value={taskForm.dueDate} onChange={e => setTaskForm(f => ({ ...f, dueDate: e.target.value }))} />
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 150 }}>
+                    <label style={lbl}>Link to Entry</label>
+                    <select style={inp} value={taskForm.linkedProblem}
+                      onChange={e => {
+                        const pid = e.target.value;
+                        const linked = problems.find(p => p.id === pid);
+                        setTaskForm(f => ({
+                          ...f,
+                          linkedProblem: pid,
+                          assignedTo: (linked && linked.suggestedTo) ? linked.suggestedTo : f.assignedTo,
+                          dueDate: (linked && linked.dueDate) ? linked.dueDate : f.dueDate
+                        }));
+                        setPrefilledFrom(linked && linked.suggestedTo ? (linked.suggestedName || getName(linked.suggestedTo)) : "");
+                      }}>
+                      <option value="">{"\u{2014}"} None {"\u{2014}"}</option>
+                      {problems.filter(p => p.status === "Open").map(p => <option key={p.id} value={p.id}>{p.id}: {p.title}</option>)}
+                    </select>
+                  </div>
                 </div>
                 <div className="act-row" style={{ display: "flex", gap: 10 }}>
                   <button className="act" style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitTask} disabled={saving}>Assign Task</button>
-                  <button className="act" style={btnS} onClick={() => { setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", linkedProblem: "" }); setPrefilledFrom(""); }}>Clear</button>
+                  <button className="act" style={btnS} onClick={() => { setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" }); setPrefilledFrom(""); }}>Clear</button>
                 </div>
               </div>
             </div>
