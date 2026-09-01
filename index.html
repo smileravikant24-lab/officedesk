@@ -51,12 +51,12 @@
       .tabbar{
         display:flex!important;position:fixed;left:0;right:0;bottom:0;z-index:950;
         background:#fff;border-top:1px solid #E5E7EB;
-        padding:6px 4px calc(6px + env(safe-area-inset-bottom));
+        padding:6px 2px calc(6px + env(safe-area-inset-bottom));
         box-shadow:0 -2px 12px #0000000d
       }
       .tabbtn{
         flex:1;border:none;background:none;display:flex;flex-direction:column;align-items:center;
-        gap:3px;padding:7px 2px;font-size:10.5px;font-weight:600;cursor:pointer;border-radius:10px
+        gap:3px;padding:7px 1px;font-size:10px;font-weight:600;cursor:pointer;border-radius:10px
       }
     }
   </style>
@@ -102,6 +102,7 @@ const waNumber = (p) => {
   const d = cleanPhone(p).replace(/^\+/, "");
   return d.length === 10 ? "91" + d : d;
 };
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
 // ──────────── API HELPER ────────────
 async function api(action, data = {}) {
@@ -130,9 +131,10 @@ function Avatar({ initials, size = 36, color = "#2D5BFF", picture }) {
   return <div style={{ width: size, height: size, borderRadius: "50%", background: color + "16", color, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: size * 0.36, letterSpacing: 0.5, flexShrink: 0 }}>{initials}</div>;
 }
 
-function StatCard({ label, value, color, icon }) {
+function StatCard({ label, value, color, icon, onClick }) {
   return (
-    <div style={{ background: "#fff", borderRadius: 12, padding: "18px 20px", flex: 1, minWidth: 130, boxShadow: "0 1px 3px #0001", border: "1px solid #E5E7EB" }}>
+    <div onClick={onClick}
+      style={{ background: "#fff", borderRadius: 12, padding: "18px 20px", flex: 1, minWidth: 130, boxShadow: "0 1px 3px #0001", border: "1px solid #E5E7EB", cursor: onClick ? "pointer" : "default" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <span style={{ fontSize: 18 }}>{icon}</span>
         <span style={{ fontSize: 10.5, color: "#6B7280", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
@@ -437,7 +439,7 @@ function Dashboard({ session, onLogout }) {
     } catch (err) { notify(err.message || "Failed to assign", true); }
     setSaving(false);
 
-    if (assignedName) { await refreshData(); notify("Task assigned to " + assignedName + "!"); setView("tasks"); }
+    if (assignedName) { await refreshData(); notify("Task assigned to " + assignedName + "!"); setView("pending"); }
   };
 
   // ── Accept a task (with a promised date) ──
@@ -511,6 +513,10 @@ function Dashboard({ session, onLogout }) {
 
   // Entries nobody was named on — only these ever need the EA
   const unassignedProblems = problems.filter(p => p.status === "Open" && !p.suggestedTo);
+  // Everything still outstanding
+  const pendingTasks = tasks.filter(t => t.status !== "Completed");
+  const notAcceptedTasks = pendingTasks.filter(t => !t.response);
+  const overdueTasks = pendingTasks.filter(t => t.dueDate && t.dueDate < todayISO());
   // Tasks actually assigned to me (the list also carries tasks raised from my entries)
   const myTasks = isEA ? tasks : tasks.filter(t => sameMail(t.assignedTo, session.email));
   const myProblems = problems;
@@ -519,6 +525,7 @@ function Dashboard({ session, onLogout }) {
 
   const navItems = isEA
     ? [{ key: "dashboard", label: "Home", icon: "\u{1F4CA}" },
+       { key: "pending", label: "Pending", icon: "\u{23F3}" },
        { key: "problems", label: "Entries", icon: "\u{1F4CB}" },
        { key: "tasks", label: "Tasks", icon: "\u{1F4CC}" },
        { key: "assign", label: "Assign", icon: "\u{2795}" },
@@ -549,6 +556,45 @@ function Dashboard({ session, onLogout }) {
     ...myProblems.map(p => ({ kind: "problem", data: p, date: p.date })),
     ...myTasks.map(t => ({ kind: "task", data: t, date: t.createdDate }))
   ].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 8);
+
+  // ── One task card, reused by the EA's Tasks and Pending screens ──
+  const eaTaskCard = (t) => {
+    const overdue = t.dueDate && t.dueDate < todayISO() && t.status !== "Completed";
+    return (
+      <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : overdue ? "#FECACA" : "#E5E7EB"}`, padding: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
+          <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
+          {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
+          <Badge text={t.status} color={statusColor(t.status)} />
+          {overdue && <Badge text="Overdue" color="#DC2626" />}
+        </div>
+        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{t.title}</div>
+        {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{t.description}</div>}
+        <div style={{ display: "flex", gap: 14, fontSize: 12, color: "#9CA3AF", flexWrap: "wrap" }}>
+          <span>{"\u{1F464}"} {t.assigneeName || t.assignedTo}</span>
+          {t.dueDate && <span style={{ color: overdue ? "#DC2626" : "#B45309", fontWeight: 600 }}>Due: {t.dueDate}</span>}
+          {t.reportedBy && <span>From: {getName(t.reportedBy)}</span>}
+          {t.linkedProblem && <span>Linked: {t.linkedProblem}</span>}
+          <span>Created: {t.createdDate}</span>
+        </div>
+
+        <ResponseInfo t={t} forEA={true} />
+
+        {!t.response && t.status === "Pending" && (
+          <div style={{ marginTop: 10, fontSize: 12.5, color: "#9CA3AF" }}>{"\u{23F3}"} Waiting for {t.assigneeName || t.assignedTo} to accept</div>
+        )}
+
+        {t.status !== "Completed" && (
+          <div className="act-row" style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            <button className="act" style={{ ...btnS, color: "#6D28D9", background: "#F5F3FF", fontSize: 13.5, padding: "11px 16px" }}
+              onClick={() => openChange(t)}>
+              {"\u{1F464}"} Change person
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div style={{ minHeight: "100vh" }}>
@@ -663,6 +709,11 @@ function Dashboard({ session, onLogout }) {
                   fontSize: 13.5, fontWeight: view === item.key ? 600 : 500, cursor: "pointer", fontFamily: "inherit", textAlign: "left",
                   borderRight: view === item.key ? "3px solid #2D5BFF" : "3px solid transparent" }}>
                 <span style={{ fontSize: 16 }}>{item.icon}</span> {item.label}
+                {item.key === "pending" && pendingTasks.length + unassignedProblems.length > 0 && (
+                  <span style={{ marginLeft: "auto", background: "#EF4444", color: "#fff", borderRadius: 999, fontSize: 10.5, fontWeight: 700, padding: "1px 7px" }}>
+                    {pendingTasks.length + unassignedProblems.length}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -690,9 +741,9 @@ function Dashboard({ session, onLogout }) {
               <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>{isEA ? "Everything reported and assigned across the office" : "Your tasks and reported entries"}</p>
 
               <div className="stat-row" style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 24 }}>
-                <StatCard label={isEA ? "Need Assigning" : "My Entries"} value={isEA ? unassignedProblems.length : myProblems.length} color="#8B5CF6" icon={"\u{1F514}"} />
+                <StatCard label={isEA ? "Pending" : "My Entries"} value={isEA ? pendingTasks.length : myProblems.length} color="#8B5CF6" icon={"\u{23F3}"} onClick={isEA ? () => setView("pending") : null} />
                 <StatCard label={isEA ? "Total Tasks" : "My Tasks"} value={myTasks.length} color="#2D5BFF" icon={"\u{1F4CC}"} />
-                <StatCard label="In Progress" value={myTasks.filter(t => t.status === "In Progress").length} color="#F59E0B" icon={"\u{23F3}"} />
+                <StatCard label={isEA ? "Overdue" : "In Progress"} value={isEA ? overdueTasks.length : myTasks.filter(t => t.status === "In Progress").length} color={isEA ? "#EF4444" : "#F59E0B"} icon={isEA ? "\u{26A0}" : "\u{23F3}"} onClick={isEA ? () => setView("pending") : null} />
                 <StatCard label="Completed" value={myTasks.filter(t => t.status === "Completed").length} color="#10B981" icon={"\u{2705}"} />
               </div>
 
@@ -770,6 +821,81 @@ function Dashboard({ session, onLogout }) {
                   <button className="act" style={btnP} onClick={() => setView("report")}>{"\u{1F6A8}"} Report a Problem</button>
                   <button className="act" style={btnS} onClick={() => setView("mytasks")}>{"\u{2705}"} View My Tasks</button>
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* ═══ EA: PENDING ═══ */}
+          {view === "pending" && isEA && (
+            <div style={{ animation: "slideIn 0.3s" }}>
+              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>Pending</h2>
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>
+                Everything still open across the office · <strong>{pendingTasks.length} task(s)</strong>
+                {overdueTasks.length > 0 && <span style={{ color: "#DC2626", fontWeight: 700 }}> · {overdueTasks.length} overdue</span>}
+              </p>
+
+              {unassignedProblems.length > 0 && (
+                <div style={{ marginBottom: 26 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#7C3AED", marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    Waiting for you to assign ({unassignedProblems.length})
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {unassignedProblems.map(p => (
+                      <div key={p.id} className="card" style={{ background: "#fff", borderRadius: 12, border: "1px solid #DDD6FE", padding: 18 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
+                          <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{p.id}</span>
+                          {p.category && <Badge text={p.category} color="#6B7280" />}
+                          {p.type && <Badge text={p.type} color={typeColor(p.type)} />}
+                          <Badge text={p.status} color={statusColor(p.status)} />
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{p.title}</div>
+                        {p.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{p.description}</div>}
+                        <div style={{ fontSize: 12, color: "#9CA3AF" }}>
+                          By {getName(p.reportedBy)} · {p.date}
+                          {p.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}> · Due: {p.dueDate}</span>}
+                        </div>
+                        <button className="act" style={{ ...btnP, background: "#7C3AED", fontSize: 13.5, padding: "11px 16px", marginTop: 14 }}
+                          onClick={() => {
+                            setTaskForm(f => ({
+                              ...f, title: p.title, description: p.description,
+                              linkedProblem: p.id, type: TYPES.includes(p.type) ? p.type : "Task",
+                              assignedTo: "", dueDate: p.dueDate || ""
+                            }));
+                            setView("assign");
+                          }}>
+                          Assign Task {"\u{2192}"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {notAcceptedTasks.length > 0 && (
+                <div style={{ marginBottom: 26 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#B45309", marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    Not accepted yet ({notAcceptedTasks.length})
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {notAcceptedTasks.map(eaTaskCard)}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#2D5BFF", marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  In hand ({pendingTasks.filter(t => t.response).length})
+                </div>
+                {pendingTasks.filter(t => t.response).length === 0
+                  ? <EmptyState icon={"\u{2705}"} title="Nothing in hand" subtitle="Accepted tasks that aren't finished show up here" />
+                  : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      {pendingTasks.filter(t => t.response).map(eaTaskCard)}
+                    </div>
+                }
+              </div>
+
+              {pendingTasks.length === 0 && unassignedProblems.length === 0 && (
+                <EmptyState icon={"\u{1F389}"} title="Nothing pending" subtitle="Every task is completed" />
               )}
             </div>
           )}
@@ -855,39 +981,42 @@ function Dashboard({ session, onLogout }) {
               {myTasks.length === 0
                 ? <EmptyState icon={"\u{1F4ED}"} title="No tasks assigned yet" subtitle="Tasks sent to you will appear here" />
                 : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {myTasks.map(t => (
-                      <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : "#E5E7EB"}`, padding: 18 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
-                          <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
-                          {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
-                          <Badge text={t.status} color={statusColor(t.status)} />
-                        </div>
-                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{t.title}</div>
-                        {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{t.description}</div>}
-                        <div style={{ fontSize: 12, color: "#9CA3AF" }}>
-                          {t.dueDate ? <span style={{ color: "#B45309", fontWeight: 600 }}>Due: {t.dueDate} · </span> : null}
-                          Assigned on {t.createdDate}
-                          {t.reportedBy && <span> · From: {getName(t.reportedBy)}</span>}
-                          {t.linkedProblem && <span> · Linked: {t.linkedProblem}</span>}
-                        </div>
+                    {myTasks.map(t => {
+                      const overdue = t.dueDate && t.dueDate < todayISO() && t.status !== "Completed";
+                      return (
+                        <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : overdue ? "#FECACA" : "#E5E7EB"}`, padding: 18 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
+                            <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
+                            {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
+                            <Badge text={t.status} color={statusColor(t.status)} />
+                            {overdue && <Badge text="Overdue" color="#DC2626" />}
+                          </div>
+                          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{t.title}</div>
+                          {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{t.description}</div>}
+                          <div style={{ fontSize: 12, color: "#9CA3AF" }}>
+                            {t.dueDate ? <span style={{ color: overdue ? "#DC2626" : "#B45309", fontWeight: 600 }}>Due: {t.dueDate} · </span> : null}
+                            Assigned on {t.createdDate}
+                            {t.reportedBy && <span> · From: {getName(t.reportedBy)}</span>}
+                            {t.linkedProblem && <span> · Linked: {t.linkedProblem}</span>}
+                          </div>
 
-                        <ResponseInfo t={t} forEA={false} />
+                          <ResponseInfo t={t} forEA={false} />
 
-                        {/* Actions */}
-                        <div className="act-row" style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-                          {t.status === "Pending" && (
-                            <button className="act" style={{ ...btnP, background: "#0891B2", fontSize: 13.5, padding: "11px 16px" }} onClick={() => openRespond(t)}>{"\u2713"} I'll do it — give date</button>
-                          )}
-                          {t.status === "Accepted" && (
-                            <button className="act" style={{ ...btnP, fontSize: 13.5, padding: "11px 16px" }} onClick={() => updateTaskStatus(t.id, "In Progress")}>{"\u{25B6}"} Start Task</button>
-                          )}
-                          {t.status === "In Progress" && (
-                            <button className="act" style={{ ...btnP, background: "#10B981", fontSize: 13.5, padding: "11px 16px" }} onClick={() => updateTaskStatus(t.id, "Completed")}>{"\u2713"} Mark Done</button>
-                          )}
-                          {t.status === "Completed" && <span style={{ fontSize: 13, color: "#10B981", fontWeight: 600 }}>{"\u{2705}"} Completed</span>}
+                          <div className="act-row" style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+                            {t.status === "Pending" && (
+                              <button className="act" style={{ ...btnP, background: "#0891B2", fontSize: 13.5, padding: "11px 16px" }} onClick={() => openRespond(t)}>{"\u2713"} I'll do it — give date</button>
+                            )}
+                            {t.status === "Accepted" && (
+                              <button className="act" style={{ ...btnP, fontSize: 13.5, padding: "11px 16px" }} onClick={() => updateTaskStatus(t.id, "In Progress")}>{"\u{25B6}"} Start Task</button>
+                            )}
+                            {t.status === "In Progress" && (
+                              <button className="act" style={{ ...btnP, background: "#10B981", fontSize: 13.5, padding: "11px 16px" }} onClick={() => updateTaskStatus(t.id, "Completed")}>{"\u2713"} Mark Done</button>
+                            )}
+                            {t.status === "Completed" && <span style={{ fontSize: 13, color: "#10B981", fontWeight: 600 }}>{"\u{2705}"} Completed</span>}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
               }
             </div>
@@ -998,39 +1127,7 @@ function Dashboard({ session, onLogout }) {
               {tasks.length === 0
                 ? <EmptyState icon={"\u{1F4CC}"} title="No tasks created yet" subtitle='Use "Assign" to create one' />
                 : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {tasks.map(t => (
-                      <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : "#E5E7EB"}`, padding: 18 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
-                          <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
-                          {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
-                          <Badge text={t.status} color={statusColor(t.status)} />
-                        </div>
-                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{t.title}</div>
-                        {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{t.description}</div>}
-                        <div style={{ display: "flex", gap: 14, fontSize: 12, color: "#9CA3AF", flexWrap: "wrap" }}>
-                          <span>{"\u{1F464}"} {t.assigneeName || t.assignedTo}</span>
-                          {t.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}>Due: {t.dueDate}</span>}
-                          {t.reportedBy && <span>From: {getName(t.reportedBy)}</span>}
-                          {t.linkedProblem && <span>Linked: {t.linkedProblem}</span>}
-                          <span>Created: {t.createdDate}</span>
-                        </div>
-
-                        <ResponseInfo t={t} forEA={true} />
-
-                        {!t.response && t.status === "Pending" && (
-                          <div style={{ marginTop: 10, fontSize: 12.5, color: "#9CA3AF" }}>{"\u{23F3}"} Waiting for {t.assigneeName || t.assignedTo} to accept</div>
-                        )}
-
-                        {t.status !== "Completed" && (
-                          <div className="act-row" style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                            <button className="act" style={{ ...btnS, color: "#6D28D9", background: "#F5F3FF", fontSize: 13.5, padding: "11px 16px" }}
-                              onClick={() => openChange(t)}>
-                              {"\u{1F464}"} Change person
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                    {tasks.map(eaTaskCard)}
                   </div>
               }
             </div>
@@ -1121,9 +1218,14 @@ function Dashboard({ session, onLogout }) {
       <nav className="tabbar">
         {navItems.map(item => (
           <button key={item.key} className="tabbtn" onClick={() => setView(item.key)}
-            style={{ color: view === item.key ? "#2D5BFF" : "#9CA3AF", background: view === item.key ? "#EEF2FF" : "none" }}>
+            style={{ color: view === item.key ? "#2D5BFF" : "#9CA3AF", background: view === item.key ? "#EEF2FF" : "none", position: "relative" }}>
             <span style={{ fontSize: 18 }}>{item.icon}</span>
             {item.label}
+            {item.key === "pending" && pendingTasks.length + unassignedProblems.length > 0 && (
+              <span style={{ position: "absolute", top: 2, right: "50%", marginRight: -22, background: "#EF4444", color: "#fff", borderRadius: 999, fontSize: 9.5, fontWeight: 700, padding: "1px 5px" }}>
+                {pendingTasks.length + unassignedProblems.length}
+              </span>
+            )}
           </button>
         ))}
       </nav>
