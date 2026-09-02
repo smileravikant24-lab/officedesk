@@ -56,7 +56,7 @@
       }
       .tabbtn{
         flex:1;border:none;background:none;display:flex;flex-direction:column;align-items:center;
-        gap:3px;padding:7px 1px;font-size:10px;font-weight:600;cursor:pointer;border-radius:10px
+        gap:3px;padding:7px 1px;font-size:9.5px;font-weight:600;cursor:pointer;border-radius:10px
       }
     }
   </style>
@@ -419,7 +419,7 @@ function Dashboard({ session, onLogout }) {
     if (sentTo !== null) {
       await refreshData();
       notify(sentTo ? "Sent directly to " + sentTo : "Saved — the EA will assign it");
-      setView("myproblems");
+      setView("tracking");
     }
   };
 
@@ -513,28 +513,28 @@ function Dashboard({ session, onLogout }) {
 
   // Entries nobody was named on — only these ever need the EA
   const unassignedProblems = problems.filter(p => p.status === "Open" && !p.suggestedTo);
-  // Everything still outstanding
+  // Everything still outstanding (EA view of the whole office)
   const pendingTasks = tasks.filter(t => t.status !== "Completed");
   const notAcceptedTasks = pendingTasks.filter(t => !t.response);
   const overdueTasks = pendingTasks.filter(t => t.dueDate && t.dueDate < todayISO());
-  // Tasks actually assigned to me (the list also carries tasks raised from my entries)
-  const myTasks = isEA ? tasks : tasks.filter(t => sameMail(t.assignedTo, session.email));
-  const myProblems = problems;
-  // Every task raised from one of my entries — an entry can have more than one
+  // Tasks assigned to ME — the EA has her own tasks too
+  const myTasks = tasks.filter(t => sameMail(t.assignedTo, session.email));
+  const myProblems = problems.filter(p => isEA ? sameMail(p.reportedBy, session.email) : true);
+  // Every task raised from an entry — an entry can have more than one
   const tasksForProblem = (pid) => tasks.filter(t => t.linkedProblem === pid);
 
   const navItems = isEA
-    ? [{ key: "dashboard", label: "Home", icon: "\u{1F4CA}" },
+    ? [{ key: "dashboard", label: "Dashboard", icon: "\u{1F4CA}" },
+       { key: "report", label: "New Request", icon: "\u{1F6A8}" },
+       { key: "mytasks", label: "My Task", icon: "\u{2705}" },
+       { key: "tracking", label: "Task Tracking", icon: "\u{1F4CB}" },
        { key: "pending", label: "Pending", icon: "\u{23F3}" },
-       { key: "problems", label: "Entries", icon: "\u{1F4CB}" },
-       { key: "tasks", label: "Tasks", icon: "\u{1F4CC}" },
-       { key: "assign", label: "Assign", icon: "\u{2795}" },
-       { key: "team", label: "Contacts", icon: "\u{1F4DE}" }]
-    : [{ key: "dashboard", label: "Home", icon: "\u{1F4CA}" },
-       { key: "report", label: "Report", icon: "\u{1F6A8}" },
-       { key: "mytasks", label: "My Tasks", icon: "\u{2705}" },
-       { key: "myproblems", label: "Entries", icon: "\u{1F4DD}" },
-       { key: "team", label: "Contacts", icon: "\u{1F4DE}" }];
+       { key: "team", label: "Contact", icon: "\u{1F4DE}" }]
+    : [{ key: "dashboard", label: "Dashboard", icon: "\u{1F4CA}" },
+       { key: "report", label: "New Request", icon: "\u{1F6A8}" },
+       { key: "mytasks", label: "My Task", icon: "\u{2705}" },
+       { key: "tracking", label: "Task Tracking", icon: "\u{1F4CB}" },
+       { key: "team", label: "Contact", icon: "\u{1F4DE}" }];
 
   const inp = { width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #D1D5DB", fontSize: 14, outline: "none", fontFamily: "inherit", boxSizing: "border-box", background: "#FAFBFC" };
   const lbl = { display: "block", marginBottom: 5, fontSize: 12, fontWeight: 600, color: "#374151", letterSpacing: 0.3 };
@@ -548,16 +548,16 @@ function Dashboard({ session, onLogout }) {
     return emp ? emp.name : (email || "Unknown");
   };
 
-  // Everyone in the Employees sheet except yourself — EA and Owner included
+  // Everyone in the Employees sheet except yourself
   const suggestableEmployees = employees.filter(e => e.email !== session.email);
 
   // ── Recent Activity rows (entries + tasks, newest first, with full detail) ──
   const activity = [
     ...myProblems.map(p => ({ kind: "problem", data: p, date: p.date })),
-    ...myTasks.map(t => ({ kind: "task", data: t, date: t.createdDate }))
+    ...(isEA ? tasks : myTasks).map(t => ({ kind: "task", data: t, date: t.createdDate }))
   ].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 8);
 
-  // ── One task card, reused by the EA's Tasks and Pending screens ──
+  // ── Task card as the EA sees it (tracking / pending) ──
   const eaTaskCard = (t) => {
     const overdue = t.dueDate && t.dueDate < todayISO() && t.status !== "Completed";
     return (
@@ -592,6 +592,44 @@ function Dashboard({ session, onLogout }) {
             </button>
           </div>
         )}
+      </div>
+    );
+  };
+
+  // ── Task card as the assignee sees it (My Task — everyone, EA included) ──
+  const myTaskCard = (t) => {
+    const overdue = t.dueDate && t.dueDate < todayISO() && t.status !== "Completed";
+    return (
+      <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : overdue ? "#FECACA" : "#E5E7EB"}`, padding: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
+          <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
+          {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
+          <Badge text={t.status} color={statusColor(t.status)} />
+          {overdue && <Badge text="Overdue" color="#DC2626" />}
+        </div>
+        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{t.title}</div>
+        {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{t.description}</div>}
+        <div style={{ fontSize: 12, color: "#9CA3AF" }}>
+          {t.dueDate ? <span style={{ color: overdue ? "#DC2626" : "#B45309", fontWeight: 600 }}>Due: {t.dueDate} · </span> : null}
+          Assigned on {t.createdDate}
+          {t.reportedBy && <span> · From: {getName(t.reportedBy)}</span>}
+          {t.linkedProblem && <span> · Linked: {t.linkedProblem}</span>}
+        </div>
+
+        <ResponseInfo t={t} forEA={false} />
+
+        <div className="act-row" style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+          {t.status === "Pending" && (
+            <button className="act" style={{ ...btnP, background: "#0891B2", fontSize: 13.5, padding: "11px 16px" }} onClick={() => openRespond(t)}>{"\u2713"} I'll do it — give date</button>
+          )}
+          {t.status === "Accepted" && (
+            <button className="act" style={{ ...btnP, fontSize: 13.5, padding: "11px 16px" }} onClick={() => updateTaskStatus(t.id, "In Progress")}>{"\u{25B6}"} Start Task</button>
+          )}
+          {t.status === "In Progress" && (
+            <button className="act" style={{ ...btnP, background: "#10B981", fontSize: 13.5, padding: "11px 16px" }} onClick={() => updateTaskStatus(t.id, "Completed")}>{"\u2713"} Mark Done</button>
+          )}
+          {t.status === "Completed" && <span style={{ fontSize: 13, color: "#10B981", fontWeight: 600 }}>{"\u{2705}"} Completed</span>}
+        </div>
       </div>
     );
   };
@@ -714,6 +752,11 @@ function Dashboard({ session, onLogout }) {
                     {pendingTasks.length + unassignedProblems.length}
                   </span>
                 )}
+                {item.key === "mytasks" && myTasks.filter(t => t.status !== "Completed").length > 0 && (
+                  <span style={{ marginLeft: "auto", background: "#2D5BFF", color: "#fff", borderRadius: 999, fontSize: 10.5, fontWeight: 700, padding: "1px 7px" }}>
+                    {myTasks.filter(t => t.status !== "Completed").length}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -737,14 +780,14 @@ function Dashboard({ session, onLogout }) {
           {/* ═══ DASHBOARD ═══ */}
           {view === "dashboard" && (
             <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>{isEA ? "EA Dashboard" : `Hi, ${firstName(user.name)}`}</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>{isEA ? "Everything reported and assigned across the office" : "Your tasks and reported entries"}</p>
+              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>Hi, {firstName(user.name)}</h2>
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>{isEA ? "Your tasks, plus everything across the office" : "Your tasks and requests"}</p>
 
               <div className="stat-row" style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 24 }}>
-                <StatCard label={isEA ? "Pending" : "My Entries"} value={isEA ? pendingTasks.length : myProblems.length} color="#8B5CF6" icon={"\u{23F3}"} onClick={isEA ? () => setView("pending") : null} />
-                <StatCard label={isEA ? "Total Tasks" : "My Tasks"} value={myTasks.length} color="#2D5BFF" icon={"\u{1F4CC}"} />
+                <StatCard label="My Task" value={myTasks.filter(t => t.status !== "Completed").length} color="#2D5BFF" icon={"\u{2705}"} onClick={() => setView("mytasks")} />
+                <StatCard label={isEA ? "Office Pending" : "My Requests"} value={isEA ? pendingTasks.length : myProblems.length} color="#8B5CF6" icon={"\u{23F3}"} onClick={() => setView(isEA ? "pending" : "tracking")} />
                 <StatCard label={isEA ? "Overdue" : "In Progress"} value={isEA ? overdueTasks.length : myTasks.filter(t => t.status === "In Progress").length} color={isEA ? "#EF4444" : "#F59E0B"} icon={isEA ? "\u{26A0}" : "\u{23F3}"} onClick={isEA ? () => setView("pending") : null} />
-                <StatCard label="Completed" value={myTasks.filter(t => t.status === "Completed").length} color="#10B981" icon={"\u{2705}"} />
+                <StatCard label="Completed" value={(isEA ? tasks : myTasks).filter(t => t.status === "Completed").length} color="#10B981" icon={"\u{1F389}"} />
               </div>
 
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", overflow: "hidden" }}>
@@ -776,7 +819,6 @@ function Dashboard({ session, onLogout }) {
                               {(d.suggestedName || d.suggestedTo) && (
                                 <span style={{ color: "#7C3AED", fontWeight: 600 }}> · Sent to: {d.suggestedName || getName(d.suggestedTo)}</span>
                               )}
-                              {isEA && <span> · By {getName(d.reportedBy)}</span>}
                             </>
                           ) : (
                             <>
@@ -816,11 +858,126 @@ function Dashboard({ session, onLogout }) {
                 )}
               </div>
 
-              {!isEA && (
-                <div className="act-row" style={{ marginTop: 20, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <button className="act" style={btnP} onClick={() => setView("report")}>{"\u{1F6A8}"} Report a Problem</button>
-                  <button className="act" style={btnS} onClick={() => setView("mytasks")}>{"\u{2705}"} View My Tasks</button>
+              <div className="act-row" style={{ marginTop: 20, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button className="act" style={btnP} onClick={() => setView("report")}>{"\u{1F6A8}"} New Request</button>
+                <button className="act" style={btnS} onClick={() => setView("mytasks")}>{"\u{2705}"} My Task</button>
+              </div>
+            </div>
+          )}
+
+          {/* ═══ NEW REQUEST (everyone) ═══ */}
+          {view === "report" && (
+            <div style={{ animation: "slideIn 0.3s" }}>
+              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>New Request</h2>
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Pick the person and it goes straight to them</p>
+              <div className="card" style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 24, maxWidth: 600 }}>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={lbl}>Title *</label>
+                  <input style={inp} placeholder="e.g., Printer not working in dispatch room" value={problemForm.title} onChange={e => setProblemForm(f => ({ ...f, title: e.target.value }))} />
                 </div>
+                <div className="form-row" style={{ display: "flex", gap: 14, marginBottom: 16 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={lbl}>Category</label>
+                    <select style={inp} value={problemForm.category} onChange={e => setProblemForm(f => ({ ...f, category: e.target.value }))}>
+                      {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={lbl}>Type</label>
+                    <select style={inp} value={problemForm.type}
+                      onChange={e => {
+                        const type = e.target.value;
+                        setProblemForm(f => ({ ...f, type, dueDate: needsDue(type) ? f.dueDate : "" }));
+                      }}>
+                      {TYPES.map(t => <option key={t}>{t}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={lbl}>Description</label>
+                  <textarea style={{ ...inp, minHeight: 96, resize: "vertical" }} placeholder="Describe it in detail..." value={problemForm.description} onChange={e => setProblemForm(f => ({ ...f, description: e.target.value }))} />
+                </div>
+                <div className="form-row" style={{ display: "flex", gap: 14, marginBottom: 14 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={lbl}>{"\u{1F464}"} Assign To</label>
+                    <select style={inp} value={problemForm.suggestedTo} onChange={e => setProblemForm(f => ({ ...f, suggestedTo: e.target.value }))}>
+                      <option value="">{"\u2014"} Let the EA decide {"\u2014"}</option>
+                      {suggestableEmployees.map(e => <option key={e.email} value={e.email}>{e.name} — {e.dept}</option>)}
+                    </select>
+                  </div>
+                  {needsDue(problemForm.type) && (
+                    <div style={{ flex: 1 }}>
+                      <label style={lbl}>{"\u{1F4C5}"} Due Date {problemForm.suggestedTo ? "*" : ""}</label>
+                      <input type="date" style={inp} value={problemForm.dueDate}
+                        onChange={e => setProblemForm(f => ({ ...f, dueDate: e.target.value }))} />
+                    </div>
+                  )}
+                </div>
+                <div style={{ fontSize: 11.5, color: "#9CA3AF", marginBottom: 20, lineHeight: 1.5 }}>
+                  {problemForm.suggestedTo
+                    ? "Submit करते ही ये task सीधे उस व्यक्ति के My Task में चला जाएगा."
+                    : "किसी को नहीं चुना तो request EA के पास जाएगी और वो assign करेंगी."}
+                  {!needsDue(problemForm.type) && " Complaint में due date नहीं लगती."}
+                </div>
+                <button className="act" style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitProblem} disabled={saving}>Submit</button>
+              </div>
+            </div>
+          )}
+
+          {/* ═══ MY TASK (everyone, EA included) ═══ */}
+          {view === "mytasks" && (
+            <div style={{ animation: "slideIn 0.3s" }}>
+              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>My Task</h2>
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Tasks given to you — accept each with the date you'll finish it by</p>
+              {myTasks.length === 0
+                ? <EmptyState icon={"\u{1F4ED}"} title="No tasks assigned to you" subtitle="Tasks sent to you will appear here" />
+                : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {myTasks.map(myTaskCard)}
+                  </div>
+              }
+            </div>
+          )}
+
+          {/* ═══ TASK TRACKING ═══ */}
+          {view === "tracking" && (
+            <div style={{ animation: "slideIn 0.3s" }}>
+              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>Task Tracking</h2>
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>
+                {isEA ? "Every task in the office — who has it and where it stands" : "What you've sent and where it stands"}
+              </p>
+
+              {isEA ? (
+                tasks.length === 0
+                  ? <EmptyState icon={"\u{1F4CC}"} title="No tasks yet" />
+                  : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      {tasks.map(eaTaskCard)}
+                    </div>
+              ) : (
+                myProblems.length === 0
+                  ? <EmptyState icon={"\u{1F4DD}"} title="Nothing sent yet" subtitle='Use "New Request" to send one' />
+                  : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      {myProblems.map(p => (
+                        <div key={p.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${p.status === "Resolved" ? "#D1FAE5" : "#E5E7EB"}`, padding: 18 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
+                            <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{p.id}</span>
+                            {p.category && <Badge text={p.category} color="#6B7280" />}
+                            {p.type && <Badge text={p.type} color={typeColor(p.type)} />}
+                            <Badge text={p.status} color={statusColor(p.status)} />
+                          </div>
+                          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{p.title}</div>
+                          {p.description && <div style={{ fontSize: 13, color: "#6B7280", lineHeight: 1.55 }}>{p.description}</div>}
+                          <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 7 }}>
+                            Sent on {p.date}
+                            {p.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}> · Due: {p.dueDate}</span>}
+                            {(p.suggestedName || p.suggestedTo) && (
+                              <span style={{ color: "#7C3AED", fontWeight: 600 }}> · Sent to: {p.suggestedName || getName(p.suggestedTo)}</span>
+                            )}
+                          </div>
+
+                          {tasksForProblem(p.id).map(t => <ReporterTaskInfo key={t.id} t={t} />)}
+                        </div>
+                      ))}
+                    </div>
               )}
             </div>
           )}
@@ -900,10 +1057,10 @@ function Dashboard({ session, onLogout }) {
             </div>
           )}
 
-          {/* ═══ CONTACTS ═══ */}
+          {/* ═══ CONTACT ═══ */}
           {view === "team" && (
             <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>Contacts</h2>
+              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>Contact</h2>
               <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Tap Call or WhatsApp to reach anyone directly</p>
               {employees.length === 0
                 ? <EmptyState icon={"\u{1F4DE}"} title="No contacts loaded" />
@@ -914,226 +1071,7 @@ function Dashboard({ session, onLogout }) {
             </div>
           )}
 
-          {/* ═══ REPORT PROBLEM ═══ */}
-          {view === "report" && !isEA && (
-            <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>Report a Problem</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Pick the person and it goes straight to them</p>
-              <div className="card" style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 24, maxWidth: 600 }}>
-                <div style={{ marginBottom: 16 }}>
-                  <label style={lbl}>Title *</label>
-                  <input style={inp} placeholder="e.g., Printer not working in dispatch room" value={problemForm.title} onChange={e => setProblemForm(f => ({ ...f, title: e.target.value }))} />
-                </div>
-                <div className="form-row" style={{ display: "flex", gap: 14, marginBottom: 16 }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={lbl}>Category</label>
-                    <select style={inp} value={problemForm.category} onChange={e => setProblemForm(f => ({ ...f, category: e.target.value }))}>
-                      {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={lbl}>Type</label>
-                    <select style={inp} value={problemForm.type}
-                      onChange={e => {
-                        const type = e.target.value;
-                        setProblemForm(f => ({ ...f, type, dueDate: needsDue(type) ? f.dueDate : "" }));
-                      }}>
-                      {TYPES.map(t => <option key={t}>{t}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <div style={{ marginBottom: 16 }}>
-                  <label style={lbl}>Description</label>
-                  <textarea style={{ ...inp, minHeight: 96, resize: "vertical" }} placeholder="Describe it in detail..." value={problemForm.description} onChange={e => setProblemForm(f => ({ ...f, description: e.target.value }))} />
-                </div>
-                <div className="form-row" style={{ display: "flex", gap: 14, marginBottom: 14 }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={lbl}>{"\u{1F464}"} Assign To</label>
-                    <select style={inp} value={problemForm.suggestedTo} onChange={e => setProblemForm(f => ({ ...f, suggestedTo: e.target.value }))}>
-                      <option value="">{"\u2014"} Let the EA decide {"\u2014"}</option>
-                      {suggestableEmployees.map(e => <option key={e.email} value={e.email}>{e.name} — {e.dept}</option>)}
-                    </select>
-                  </div>
-                  {needsDue(problemForm.type) && (
-                    <div style={{ flex: 1 }}>
-                      <label style={lbl}>{"\u{1F4C5}"} Due Date {problemForm.suggestedTo ? "*" : ""}</label>
-                      <input type="date" style={inp} value={problemForm.dueDate}
-                        onChange={e => setProblemForm(f => ({ ...f, dueDate: e.target.value }))} />
-                    </div>
-                  )}
-                </div>
-                <div style={{ fontSize: 11.5, color: "#9CA3AF", marginBottom: 20, lineHeight: 1.5 }}>
-                  {problemForm.suggestedTo
-                    ? "Submit करते ही ये task सीधे उस व्यक्ति के My Tasks में चला जाएगा."
-                    : "किसी को नहीं चुना तो entry EA के पास जाएगी और वो assign करेंगी."}
-                  {!needsDue(problemForm.type) && " Complaint में due date नहीं लगती."}
-                </div>
-                <button className="act" style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitProblem} disabled={saving}>Submit</button>
-              </div>
-            </div>
-          )}
-
-          {/* ═══ MY TASKS ═══ */}
-          {view === "mytasks" && !isEA && (
-            <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>My Tasks</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Accept each task with the date you'll finish it by</p>
-              {myTasks.length === 0
-                ? <EmptyState icon={"\u{1F4ED}"} title="No tasks assigned yet" subtitle="Tasks sent to you will appear here" />
-                : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {myTasks.map(t => {
-                      const overdue = t.dueDate && t.dueDate < todayISO() && t.status !== "Completed";
-                      return (
-                        <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : overdue ? "#FECACA" : "#E5E7EB"}`, padding: 18 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
-                            <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
-                            {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
-                            <Badge text={t.status} color={statusColor(t.status)} />
-                            {overdue && <Badge text="Overdue" color="#DC2626" />}
-                          </div>
-                          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{t.title}</div>
-                          {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{t.description}</div>}
-                          <div style={{ fontSize: 12, color: "#9CA3AF" }}>
-                            {t.dueDate ? <span style={{ color: overdue ? "#DC2626" : "#B45309", fontWeight: 600 }}>Due: {t.dueDate} · </span> : null}
-                            Assigned on {t.createdDate}
-                            {t.reportedBy && <span> · From: {getName(t.reportedBy)}</span>}
-                            {t.linkedProblem && <span> · Linked: {t.linkedProblem}</span>}
-                          </div>
-
-                          <ResponseInfo t={t} forEA={false} />
-
-                          <div className="act-row" style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-                            {t.status === "Pending" && (
-                              <button className="act" style={{ ...btnP, background: "#0891B2", fontSize: 13.5, padding: "11px 16px" }} onClick={() => openRespond(t)}>{"\u2713"} I'll do it — give date</button>
-                            )}
-                            {t.status === "Accepted" && (
-                              <button className="act" style={{ ...btnP, fontSize: 13.5, padding: "11px 16px" }} onClick={() => updateTaskStatus(t.id, "In Progress")}>{"\u{25B6}"} Start Task</button>
-                            )}
-                            {t.status === "In Progress" && (
-                              <button className="act" style={{ ...btnP, background: "#10B981", fontSize: 13.5, padding: "11px 16px" }} onClick={() => updateTaskStatus(t.id, "Completed")}>{"\u2713"} Mark Done</button>
-                            )}
-                            {t.status === "Completed" && <span style={{ fontSize: 13, color: "#10B981", fontWeight: 600 }}>{"\u{2705}"} Completed</span>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-              }
-            </div>
-          )}
-
-          {/* ═══ MY ENTRIES ═══ */}
-          {view === "myproblems" && !isEA && (
-            <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>My Entries</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Status of everything you've reported</p>
-              {myProblems.length === 0
-                ? <EmptyState icon={"\u{1F4DD}"} title="Nothing reported yet" subtitle='Use "Report" to submit one' />
-                : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {myProblems.map(p => (
-                      <div key={p.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${p.status === "Resolved" ? "#D1FAE5" : "#E5E7EB"}`, padding: 18 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
-                          <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{p.id}</span>
-                          {p.category && <Badge text={p.category} color="#6B7280" />}
-                          {p.type && <Badge text={p.type} color={typeColor(p.type)} />}
-                          <Badge text={p.status} color={statusColor(p.status)} />
-                        </div>
-                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{p.title}</div>
-                        {p.description && <div style={{ fontSize: 13, color: "#6B7280", lineHeight: 1.55 }}>{p.description}</div>}
-                        <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 7 }}>
-                          Reported on {p.date}
-                          {p.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}> · Due: {p.dueDate}</span>}
-                          {(p.suggestedName || p.suggestedTo) && (
-                            <span style={{ color: "#7C3AED", fontWeight: 600 }}> · Sent to: {p.suggestedName || getName(p.suggestedTo)}</span>
-                          )}
-                        </div>
-
-                        {tasksForProblem(p.id).map(t => <ReporterTaskInfo key={t.id} t={t} />)}
-                      </div>
-                    ))}
-                  </div>
-              }
-            </div>
-          )}
-
-          {/* ═══ EA: ALL ENTRIES ═══ */}
-          {view === "problems" && isEA && (
-            <div style={{ animation: "slideIn 0.3s" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>All Entries</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Only entries with nobody named need you · <strong>{unassignedProblems.length} waiting</strong></p>
-              {problems.length === 0
-                ? <EmptyState icon={"\u{1F4CB}"} title="Nothing reported yet" />
-                : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {problems.map(p => (
-                      <div key={p.id} className="card" style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 18 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
-                          <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{p.id}</span>
-                          {p.category && <Badge text={p.category} color="#6B7280" />}
-                          {p.type && <Badge text={p.type} color={typeColor(p.type)} />}
-                          <Badge text={p.status} color={statusColor(p.status)} />
-                          {(p.suggestedName || p.suggestedTo) && <Badge text={`For: ${p.suggestedName || getName(p.suggestedTo)}`} color="#7C3AED" />}
-                        </div>
-                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{p.title}</div>
-                        {p.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{p.description}</div>}
-                        <div style={{ fontSize: 12, color: "#9CA3AF" }}>
-                          By {getName(p.reportedBy)} · {p.date}
-                          {p.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}> · Due: {p.dueDate}</span>}
-                        </div>
-
-                        {tasksForProblem(p.id).map(t => (
-                          <div key={t.id} style={{ fontSize: 12.5, color: "#334155", marginTop: 8, lineHeight: 1.7 }}>
-                            {"\u{1F4CC}"} {t.id} with {t.assigneeName || t.assignedTo} · <span style={{ color: statusColor(t.status), fontWeight: 600 }}>{t.status}</span>
-                            {t.promisedDate && <span> · will complete by <strong>{t.promisedDate}</strong></span>}
-                            {t.completedAt && <span style={{ color: "#15803D", fontWeight: 600 }}> · done {t.completedAt}</span>}
-                          </div>
-                        ))}
-
-                        {/* Only entries where nobody was named ever need the EA */}
-                        {p.status === "Open" && !p.suggestedTo && (
-                          <button className="act" style={{ ...btnP, background: "#7C3AED", fontSize: 13.5, padding: "11px 16px", marginTop: 14 }}
-                            onClick={() => {
-                              setTaskForm(f => ({
-                                ...f, title: p.title, description: p.description,
-                                linkedProblem: p.id, type: TYPES.includes(p.type) ? p.type : "Task",
-                                assignedTo: "", dueDate: p.dueDate || ""
-                              }));
-                              setView("assign");
-                            }}>
-                            Assign Task {"\u{2192}"}
-                          </button>
-                        )}
-                        {p.status === "Open" && p.suggestedTo && (
-                          <div style={{ fontSize: 12.5, color: "#7C3AED", fontWeight: 600, marginTop: 10 }}>
-                            {"\u{1F464}"} Sent directly to {p.suggestedName || getName(p.suggestedTo)}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-              }
-            </div>
-          )}
-
-          {/* ═══ EA: ALL TASKS ═══ */}
-          {view === "tasks" && isEA && (
-            <div style={{ animation: "slideIn 0.3s" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: 21, fontWeight: 700 }}>All Tasks</h2>
-                  <p style={{ margin: "5px 0 0", color: "#6B7280", fontSize: 13.5 }}>Who accepted, by when — and change the person any time</p>
-                </div>
-                <button className="act" style={btnP} onClick={() => setView("assign")}>{"\u{2795}"} New Task</button>
-              </div>
-              {tasks.length === 0
-                ? <EmptyState icon={"\u{1F4CC}"} title="No tasks created yet" subtitle='Use "Assign" to create one' />
-                : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {tasks.map(eaTaskCard)}
-                  </div>
-              }
-            </div>
-          )}
-
-          {/* ═══ EA: ASSIGN TASK ═══ */}
+          {/* ═══ EA: ASSIGN TASK (opened from Pending) ═══ */}
           {view === "assign" && isEA && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>Assign New Task</h2>
@@ -1179,7 +1117,7 @@ function Dashboard({ session, onLogout }) {
                     </div>
                   )}
                   <div style={{ flex: 1, minWidth: 150 }}>
-                    <label style={lbl}>Link to Entry</label>
+                    <label style={lbl}>Link to Request</label>
                     <select style={inp} value={taskForm.linkedProblem}
                       onChange={e => {
                         const pid = e.target.value;
@@ -1197,7 +1135,7 @@ function Dashboard({ session, onLogout }) {
                 </div>
                 <div className="act-row" style={{ display: "flex", gap: 10 }}>
                   <button className="act" style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={submitTask} disabled={saving}>Assign Task</button>
-                  <button className="act" style={btnS} onClick={() => setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" })}>Clear</button>
+                  <button className="act" style={btnS} onClick={() => setView("pending")}>Cancel</button>
                 </div>
               </div>
             </div>
@@ -1222,8 +1160,13 @@ function Dashboard({ session, onLogout }) {
             <span style={{ fontSize: 18 }}>{item.icon}</span>
             {item.label}
             {item.key === "pending" && pendingTasks.length + unassignedProblems.length > 0 && (
-              <span style={{ position: "absolute", top: 2, right: "50%", marginRight: -22, background: "#EF4444", color: "#fff", borderRadius: 999, fontSize: 9.5, fontWeight: 700, padding: "1px 5px" }}>
+              <span style={{ position: "absolute", top: 2, right: "50%", marginRight: -20, background: "#EF4444", color: "#fff", borderRadius: 999, fontSize: 9.5, fontWeight: 700, padding: "1px 5px" }}>
                 {pendingTasks.length + unassignedProblems.length}
+              </span>
+            )}
+            {item.key === "mytasks" && myTasks.filter(t => t.status !== "Completed").length > 0 && (
+              <span style={{ position: "absolute", top: 2, right: "50%", marginRight: -20, background: "#2D5BFF", color: "#fff", borderRadius: 999, fontSize: 9.5, fontWeight: 700, padding: "1px 5px" }}>
+                {myTasks.filter(t => t.status !== "Completed").length}
               </span>
             )}
           </button>
