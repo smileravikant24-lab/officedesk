@@ -126,6 +126,11 @@ function Badge({ text, color }) {
   return <span style={{ display: "inline-block", padding: "2px 9px", borderRadius: 999, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3, background: color + "18", color, border: `1px solid ${color}40`, textTransform: "uppercase" }}>{text}</span>;
 }
 
+// Solid tag used to mark who a row belongs to
+function OwnerTag({ text, color }) {
+  return <span style={{ display: "inline-block", padding: "2px 9px", borderRadius: 6, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4, background: color, color: "#fff", textTransform: "uppercase" }}>{text}</span>;
+}
+
 function Avatar({ initials, size = 36, color = "#2D5BFF", picture }) {
   if (picture) return <img src={picture} alt="" style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} referrerPolicy="no-referrer" />;
   return <div style={{ width: size, height: size, borderRadius: "50%", background: color + "16", color, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: size * 0.36, letterSpacing: 0.5, flexShrink: 0 }}>{initials}</div>;
@@ -504,7 +509,7 @@ function Dashboard({ session, onLogout }) {
     setSaving(false);
     if (ok) {
       await refreshData();
-      notify(newStatus === "Completed" ? "Done! Moved to Completed on your Dashboard" : "Task updated to " + newStatus);
+      notify(newStatus === "Completed" ? "Done! Moved to your Dashboard" : "Task updated to " + newStatus);
     }
   };
 
@@ -523,9 +528,7 @@ function Dashboard({ session, onLogout }) {
   // Tasks assigned to ME — the EA has her own tasks too
   const myTasks = tasks.filter(t => sameMail(t.assignedTo, session.email));
   const myOpenTasks = myTasks.filter(t => t.status !== "Completed");   // shown in My Task
-  const completedTasks = (isEA ? tasks : myTasks)
-    .filter(t => t.status === "Completed")
-    .sort((a, b) => String(b.completedAt || b.createdDate).localeCompare(String(a.completedAt || a.createdDate)));
+  const completedTasks = (isEA ? tasks : myTasks).filter(t => t.status === "Completed");
   const myProblems = problems.filter(p => isEA ? sameMail(p.reportedBy, session.email) : true);
   // Every task raised from a request — a request can have more than one
   const tasksForProblem = (pid) => tasks.filter(t => t.linkedProblem === pid);
@@ -562,14 +565,24 @@ function Dashboard({ session, onLogout }) {
   const activity = [
     ...myProblems.map(p => ({ kind: "problem", data: p, date: p.date })),
     ...(isEA ? tasks : myTasks).map(t => ({ kind: "task", data: t, date: t.createdDate }))
-  ].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 8);
+  ].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 12);
+
+  // Who does this row belong to?
+  const ownerTag = (item) => {
+    if (item.kind === "problem") return { text: "My Request", color: "#8B5CF6" };
+    return sameMail(item.data.assignedTo, session.email)
+      ? { text: "My Task", color: "#2D5BFF" }
+      : { text: "Assigned Task", color: "#7C3AED" };
+  };
 
   // ── Task card as the EA sees it (tracking / pending) ──
   const eaTaskCard = (t) => {
     const overdue = t.dueDate && t.dueDate < todayISO() && t.status !== "Completed";
+    const mine = sameMail(t.assignedTo, session.email);
     return (
       <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : overdue ? "#FECACA" : "#E5E7EB"}`, padding: 18 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
+          <OwnerTag text={mine ? "My Task" : "Assigned Task"} color={mine ? "#2D5BFF" : "#7C3AED"} />
           <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
           {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
           <Badge text={t.status} color={statusColor(t.status)} />
@@ -609,6 +622,7 @@ function Dashboard({ session, onLogout }) {
     return (
       <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${overdue ? "#FECACA" : "#E5E7EB"}`, padding: 18 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
+          <OwnerTag text="My Task" color="#2D5BFF" />
           <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
           {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
           <Badge text={t.status} color={statusColor(t.status)} />
@@ -796,54 +810,27 @@ function Dashboard({ session, onLogout }) {
                 <StatCard label="Completed" value={completedTasks.length} color="#10B981" icon={"\u{1F389}"} />
               </div>
 
-              {/* ── Completed tasks live here, out of My Task ── */}
-              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", overflow: "hidden", marginBottom: 24 }}>
-                <div style={{ padding: "14px 18px", borderBottom: "1px solid #F3F4F6", fontWeight: 700, fontSize: 14.5, color: "#15803D" }}>
-                  {"\u2705"} Completed ({completedTasks.length})
-                </div>
-                {completedTasks.slice(0, 10).map(t => (
-                  <div key={t.id} style={{ padding: "13px 18px", borderBottom: "1px solid #F3F4F6" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4, flexWrap: "wrap" }}>
-                      <span style={{ color: "#9CA3AF", fontFamily: "monospace", fontSize: 12 }}>{t.id}</span>
-                      {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
-                      <Badge text="Completed" color="#10B981" />
-                    </div>
-                    <div style={{ fontSize: 14, fontWeight: 700 }}>{t.title}</div>
-                    <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 4, lineHeight: 1.7 }}>
-                      {isEA && <span>{"\u{1F464}"} {t.assigneeName || t.assignedTo} · </span>}
-                      {t.reportedBy && <span>From: {getName(t.reportedBy)} · </span>}
-                      {t.dueDate && <span>Due was {t.dueDate} · </span>}
-                      <span style={{ color: "#15803D", fontWeight: 600 }}>Done {t.completedAt || t.createdDate}</span>
-                    </div>
-                  </div>
-                ))}
-                {completedTasks.length === 0 && (
-                  <div style={{ padding: 26, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>Nothing completed yet</div>
-                )}
-                {completedTasks.length > 10 && (
-                  <div style={{ padding: "12px 18px", fontSize: 12, color: "#9CA3AF" }}>+ {completedTasks.length - 10} more</div>
-                )}
-              </div>
-
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", overflow: "hidden" }}>
                 <div style={{ padding: "14px 18px", borderBottom: "1px solid #F3F4F6", fontWeight: 700, fontSize: 14.5 }}>Recent Activity</div>
                 {activity.map((item, i) => {
                   const d = item.data;
                   const isProblem = item.kind === "problem";
+                  const tag = ownerTag(item);
                   return (
                     <div key={i} style={{ padding: "15px 18px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "flex-start", gap: 12 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: "50%", marginTop: 7, background: isProblem ? "#8B5CF6" : "#2D5BFF", flexShrink: 0 }} />
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", marginTop: 7, background: tag.color, flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, flexWrap: "wrap" }}>
+                          <OwnerTag text={tag.text} color={tag.color} />
                           <span style={{ color: "#9CA3AF", fontFamily: "monospace", fontSize: 12 }}>{d.id}</span>
                           {isProblem && d.category && <Badge text={d.category} color="#6B7280" />}
                           {d.type && <Badge text={d.type} color={typeColor(d.type)} />}
                           <Badge text={d.status} color={statusColor(d.status)} />
                         </div>
 
-                        <div style={{ fontSize: 14, fontWeight: 700 }}>{d.title}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, wordBreak: "break-word" }}>{d.title}</div>
                         {d.description && (
-                          <div style={{ fontSize: 12.5, color: "#6B7280", marginTop: 4, lineHeight: 1.55 }}>{d.description}</div>
+                          <div style={{ fontSize: 12.5, color: "#6B7280", marginTop: 4, lineHeight: 1.55, wordBreak: "break-word" }}>{d.description}</div>
                         )}
 
                         <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 6, lineHeight: 1.7 }}>
@@ -965,12 +952,9 @@ function Dashboard({ session, onLogout }) {
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>My Task</h2>
               <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>
                 Tasks given to you · finished ones move to the Dashboard
-                {completedTasks.length > 0 && (
-                  <span> · <span onClick={() => setView("dashboard")} style={{ color: "#15803D", fontWeight: 600, cursor: "pointer" }}>{myTasks.filter(t => t.status === "Completed").length} completed</span></span>
-                )}
               </p>
               {myOpenTasks.length === 0
-                ? <EmptyState icon={"\u{1F389}"} title="Nothing pending on you" subtitle="Completed tasks are on your Dashboard" />
+                ? <EmptyState icon={"\u{1F389}"} title="Nothing pending on you" subtitle="Completed tasks show on your Dashboard" />
                 : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     {myOpenTasks.map(myTaskCard)}
                   </div>
@@ -999,13 +983,14 @@ function Dashboard({ session, onLogout }) {
                       {myProblems.map(p => (
                         <div key={p.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${p.status === "Resolved" ? "#D1FAE5" : "#E5E7EB"}`, padding: 18 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
+                            <OwnerTag text="My Request" color="#8B5CF6" />
                             <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{p.id}</span>
                             {p.category && <Badge text={p.category} color="#6B7280" />}
                             {p.type && <Badge text={p.type} color={typeColor(p.type)} />}
                             <Badge text={p.status} color={statusColor(p.status)} />
                           </div>
-                          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{p.title}</div>
-                          {p.description && <div style={{ fontSize: 13, color: "#6B7280", lineHeight: 1.55 }}>{p.description}</div>}
+                          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5, wordBreak: "break-word" }}>{p.title}</div>
+                          {p.description && <div style={{ fontSize: 13, color: "#6B7280", lineHeight: 1.55, wordBreak: "break-word" }}>{p.description}</div>}
                           <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 7 }}>
                             Sent on {p.date}
                             {p.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}> · Due: {p.dueDate}</span>}
