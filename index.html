@@ -241,7 +241,7 @@ function ResponseInfo({ t, forEA }) {
   );
 }
 
-// ──────────── PROGRESS STRIP for the person who REPORTED the entry ────────────
+// ──────────── PROGRESS STRIP for the person who SENT the request ────────────
 function ReporterTaskInfo({ t }) {
   if (!t) return null;
   const done = t.status === "Completed";
@@ -399,7 +399,7 @@ function Dashboard({ session, onLogout }) {
 
   useEffect(() => { refreshData(); }, [refreshData]);
 
-  // ── Submit Problem ── (with a person chosen it goes straight to them)
+  // ── Submit Request ── (with a person chosen it goes straight to them)
   const submitProblem = async () => {
     if (!problemForm.title.trim()) { notify("Please enter a title", true); return; }
     if (needsDue(problemForm.type) && problemForm.suggestedTo && !problemForm.dueDate) {
@@ -502,7 +502,10 @@ function Dashboard({ session, onLogout }) {
       if (result.success) ok = true; else notify(result.error, true);
     } catch (err) { notify(err.message || "Failed to update", true); }
     setSaving(false);
-    if (ok) { await refreshData(); notify("Task updated to " + newStatus); }
+    if (ok) {
+      await refreshData();
+      notify(newStatus === "Completed" ? "Done! Moved to Completed on your Dashboard" : "Task updated to " + newStatus);
+    }
   };
 
   const handleLogout = () => {
@@ -511,7 +514,7 @@ function Dashboard({ session, onLogout }) {
     onLogout();
   };
 
-  // Entries nobody was named on — only these ever need the EA
+  // Requests nobody was named on — only these ever need the EA
   const unassignedProblems = problems.filter(p => p.status === "Open" && !p.suggestedTo);
   // Everything still outstanding (EA view of the whole office)
   const pendingTasks = tasks.filter(t => t.status !== "Completed");
@@ -519,8 +522,12 @@ function Dashboard({ session, onLogout }) {
   const overdueTasks = pendingTasks.filter(t => t.dueDate && t.dueDate < todayISO());
   // Tasks assigned to ME — the EA has her own tasks too
   const myTasks = tasks.filter(t => sameMail(t.assignedTo, session.email));
+  const myOpenTasks = myTasks.filter(t => t.status !== "Completed");   // shown in My Task
+  const completedTasks = (isEA ? tasks : myTasks)
+    .filter(t => t.status === "Completed")
+    .sort((a, b) => String(b.completedAt || b.createdDate).localeCompare(String(a.completedAt || a.createdDate)));
   const myProblems = problems.filter(p => isEA ? sameMail(p.reportedBy, session.email) : true);
-  // Every task raised from an entry — an entry can have more than one
+  // Every task raised from a request — a request can have more than one
   const tasksForProblem = (pid) => tasks.filter(t => t.linkedProblem === pid);
 
   const navItems = isEA
@@ -551,7 +558,7 @@ function Dashboard({ session, onLogout }) {
   // Everyone in the Employees sheet except yourself
   const suggestableEmployees = employees.filter(e => e.email !== session.email);
 
-  // ── Recent Activity rows (entries + tasks, newest first, with full detail) ──
+  // ── Recent Activity rows (requests + tasks, newest first, with full detail) ──
   const activity = [
     ...myProblems.map(p => ({ kind: "problem", data: p, date: p.date })),
     ...(isEA ? tasks : myTasks).map(t => ({ kind: "task", data: t, date: t.createdDate }))
@@ -600,7 +607,7 @@ function Dashboard({ session, onLogout }) {
   const myTaskCard = (t) => {
     const overdue = t.dueDate && t.dueDate < todayISO() && t.status !== "Completed";
     return (
-      <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.status === "Completed" ? "#D1FAE5" : overdue ? "#FECACA" : "#E5E7EB"}`, padding: 18 }}>
+      <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${overdue ? "#FECACA" : "#E5E7EB"}`, padding: 18 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
           <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
           {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
@@ -628,7 +635,6 @@ function Dashboard({ session, onLogout }) {
           {t.status === "In Progress" && (
             <button className="act" style={{ ...btnP, background: "#10B981", fontSize: 13.5, padding: "11px 16px" }} onClick={() => updateTaskStatus(t.id, "Completed")}>{"\u2713"} Mark Done</button>
           )}
-          {t.status === "Completed" && <span style={{ fontSize: 13, color: "#10B981", fontWeight: 600 }}>{"\u{2705}"} Completed</span>}
         </div>
       </div>
     );
@@ -752,9 +758,9 @@ function Dashboard({ session, onLogout }) {
                     {pendingTasks.length + unassignedProblems.length}
                   </span>
                 )}
-                {item.key === "mytasks" && myTasks.filter(t => t.status !== "Completed").length > 0 && (
+                {item.key === "mytasks" && myOpenTasks.length > 0 && (
                   <span style={{ marginLeft: "auto", background: "#2D5BFF", color: "#fff", borderRadius: 999, fontSize: 10.5, fontWeight: 700, padding: "1px 7px" }}>
-                    {myTasks.filter(t => t.status !== "Completed").length}
+                    {myOpenTasks.length}
                   </span>
                 )}
               </button>
@@ -784,10 +790,39 @@ function Dashboard({ session, onLogout }) {
               <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>{isEA ? "Your tasks, plus everything across the office" : "Your tasks and requests"}</p>
 
               <div className="stat-row" style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 24 }}>
-                <StatCard label="My Task" value={myTasks.filter(t => t.status !== "Completed").length} color="#2D5BFF" icon={"\u{2705}"} onClick={() => setView("mytasks")} />
+                <StatCard label="My Task" value={myOpenTasks.length} color="#2D5BFF" icon={"\u{2705}"} onClick={() => setView("mytasks")} />
                 <StatCard label={isEA ? "Office Pending" : "My Requests"} value={isEA ? pendingTasks.length : myProblems.length} color="#8B5CF6" icon={"\u{23F3}"} onClick={() => setView(isEA ? "pending" : "tracking")} />
-                <StatCard label={isEA ? "Overdue" : "In Progress"} value={isEA ? overdueTasks.length : myTasks.filter(t => t.status === "In Progress").length} color={isEA ? "#EF4444" : "#F59E0B"} icon={isEA ? "\u{26A0}" : "\u{23F3}"} onClick={isEA ? () => setView("pending") : null} />
-                <StatCard label="Completed" value={(isEA ? tasks : myTasks).filter(t => t.status === "Completed").length} color="#10B981" icon={"\u{1F389}"} />
+                <StatCard label={isEA ? "Overdue" : "In Progress"} value={isEA ? overdueTasks.length : myOpenTasks.filter(t => t.status === "In Progress").length} color={isEA ? "#EF4444" : "#F59E0B"} icon={isEA ? "\u{26A0}" : "\u{23F3}"} onClick={isEA ? () => setView("pending") : null} />
+                <StatCard label="Completed" value={completedTasks.length} color="#10B981" icon={"\u{1F389}"} />
+              </div>
+
+              {/* ── Completed tasks live here, out of My Task ── */}
+              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", overflow: "hidden", marginBottom: 24 }}>
+                <div style={{ padding: "14px 18px", borderBottom: "1px solid #F3F4F6", fontWeight: 700, fontSize: 14.5, color: "#15803D" }}>
+                  {"\u2705"} Completed ({completedTasks.length})
+                </div>
+                {completedTasks.slice(0, 10).map(t => (
+                  <div key={t.id} style={{ padding: "13px 18px", borderBottom: "1px solid #F3F4F6" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4, flexWrap: "wrap" }}>
+                      <span style={{ color: "#9CA3AF", fontFamily: "monospace", fontSize: 12 }}>{t.id}</span>
+                      {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
+                      <Badge text="Completed" color="#10B981" />
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{t.title}</div>
+                    <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 4, lineHeight: 1.7 }}>
+                      {isEA && <span>{"\u{1F464}"} {t.assigneeName || t.assignedTo} · </span>}
+                      {t.reportedBy && <span>From: {getName(t.reportedBy)} · </span>}
+                      {t.dueDate && <span>Due was {t.dueDate} · </span>}
+                      <span style={{ color: "#15803D", fontWeight: 600 }}>Done {t.completedAt || t.createdDate}</span>
+                    </div>
+                  </div>
+                ))}
+                {completedTasks.length === 0 && (
+                  <div style={{ padding: 26, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>Nothing completed yet</div>
+                )}
+                {completedTasks.length > 10 && (
+                  <div style={{ padding: "12px 18px", fontSize: 12, color: "#9CA3AF" }}>+ {completedTasks.length - 10} more</div>
+                )}
               </div>
 
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", overflow: "hidden" }}>
@@ -814,7 +849,7 @@ function Dashboard({ session, onLogout }) {
                         <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 6, lineHeight: 1.7 }}>
                           {isProblem ? (
                             <>
-                              Reported on {d.date}
+                              Sent on {d.date}
                               {d.dueDate && <span style={{ color: "#B45309", fontWeight: 600 }}> · Due: {d.dueDate}</span>}
                               {(d.suggestedName || d.suggestedTo) && (
                                 <span style={{ color: "#7C3AED", fontWeight: 600 }}> · Sent to: {d.suggestedName || getName(d.suggestedTo)}</span>
@@ -924,15 +959,20 @@ function Dashboard({ session, onLogout }) {
             </div>
           )}
 
-          {/* ═══ MY TASK (everyone, EA included) ═══ */}
+          {/* ═══ MY TASK (open tasks only) ═══ */}
           {view === "mytasks" && (
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>My Task</h2>
-              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>Tasks given to you — accept each with the date you'll finish it by</p>
-              {myTasks.length === 0
-                ? <EmptyState icon={"\u{1F4ED}"} title="No tasks assigned to you" subtitle="Tasks sent to you will appear here" />
+              <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>
+                Tasks given to you · finished ones move to the Dashboard
+                {completedTasks.length > 0 && (
+                  <span> · <span onClick={() => setView("dashboard")} style={{ color: "#15803D", fontWeight: 600, cursor: "pointer" }}>{myTasks.filter(t => t.status === "Completed").length} completed</span></span>
+                )}
+              </p>
+              {myOpenTasks.length === 0
+                ? <EmptyState icon={"\u{1F389}"} title="Nothing pending on you" subtitle="Completed tasks are on your Dashboard" />
                 : <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {myTasks.map(myTaskCard)}
+                    {myOpenTasks.map(myTaskCard)}
                   </div>
               }
             </div>
@@ -1079,7 +1119,7 @@ function Dashboard({ session, onLogout }) {
               <div className="card" style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", padding: 24, maxWidth: 600 }}>
                 {taskForm.linkedProblem && (
                   <div style={{ background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 9, padding: "10px 13px", marginBottom: 16, fontSize: 12.5, color: "#4338CA", lineHeight: 1.55 }}>
-                    {"\u{1F517}"} Linked to entry <strong>{taskForm.linkedProblem}</strong> — completing it will auto-resolve the entry
+                    {"\u{1F517}"} Linked to request <strong>{taskForm.linkedProblem}</strong> — completing it will auto-resolve the request
                   </div>
                 )}
                 <div style={{ marginBottom: 16 }}>
@@ -1164,9 +1204,9 @@ function Dashboard({ session, onLogout }) {
                 {pendingTasks.length + unassignedProblems.length}
               </span>
             )}
-            {item.key === "mytasks" && myTasks.filter(t => t.status !== "Completed").length > 0 && (
+            {item.key === "mytasks" && myOpenTasks.length > 0 && (
               <span style={{ position: "absolute", top: 2, right: "50%", marginRight: -20, background: "#2D5BFF", color: "#fff", borderRadius: 999, fontSize: 9.5, fontWeight: 700, padding: "1px 5px" }}>
-                {myTasks.filter(t => t.status !== "Completed").length}
+                {myOpenTasks.length}
               </span>
             )}
           </button>
