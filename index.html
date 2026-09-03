@@ -228,6 +228,22 @@ function PhoneCard({ emp, isSelf }) {
   );
 }
 
+// ──────────── "SENT BACK" STRIP ────────────
+function ReopenInfo({ t }) {
+  if (!t.reopenNote) return null;
+  return (
+    <div style={{
+      marginTop: 10, padding: "10px 12px", borderRadius: 9,
+      background: "#FFF7ED", border: "1px solid #FED7AA",
+      fontSize: 12.5, color: "#9A3412", lineHeight: 1.6
+    }}>
+      <strong>{"\u21A9"} Sent back — not complete</strong>
+      <div style={{ marginTop: 3 }}>{t.reopenNote}</div>
+      {t.reopenedAt && <div style={{ marginTop: 3, opacity: 0.75 }}>on {t.reopenedAt}</div>}
+    </div>
+  );
+}
+
 // ──────────── ACCEPTANCE STRIP (shown on task cards) ────────────
 function ResponseInfo({ t, forEA }) {
   if (!t.response) return null;
@@ -247,7 +263,7 @@ function ResponseInfo({ t, forEA }) {
 }
 
 // ──────────── PROGRESS STRIP for the person who SENT the request ────────────
-function ReporterTaskInfo({ t }) {
+function ReporterTaskInfo({ t, onReopen }) {
   if (!t) return null;
   const done = t.status === "Completed";
   return (
@@ -268,7 +284,16 @@ function ReporterTaskInfo({ t }) {
             {t.respondedOn && <div style={{ marginTop: 3, opacity: 0.75 }}>Responded on {t.respondedOn}</div>}
           </>
         : <div style={{ marginTop: 3, opacity: 0.8 }}>{"\u{23F3}"} Not accepted yet</div>}
+      {t.reopenNote && (
+        <div style={{ marginTop: 3, color: "#9A3412" }}>{"\u21A9"} You sent it back: {t.reopenNote}</div>
+      )}
       {t.completedAt && <div style={{ marginTop: 3, color: "#15803D", fontWeight: 600 }}>{"\u2705"} Completed on {t.completedAt}</div>}
+      {onReopen && (
+        <button onClick={onReopen}
+          style={{ marginTop: 10, padding: "9px 14px", borderRadius: 9, border: "1px solid #FED7AA", background: "#FFF7ED", color: "#9A3412", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+          {"\u21A9"} Not done — send back
+        </button>
+      )}
     </div>
   );
 }
@@ -373,6 +398,8 @@ function Dashboard({ session, onLogout }) {
   const [respForm, setRespForm] = useState({ promisedDate: "", note: "" });
   const [changing, setChanging] = useState(null);     // task whose person the EA is changing
   const [newAssignee, setNewAssignee] = useState("");
+  const [sendBack, setSendBack] = useState(null);     // completed task being sent back
+  const [sendBackReason, setSendBackReason] = useState("");
 
   const user = session.employee;
   const isEA = user.role === 'EA';
@@ -411,7 +438,7 @@ function Dashboard({ session, onLogout }) {
       notify("Please give a due date for that person", true); return;
     }
     setSaving(true);
-    let sentTo = null;   // "" when nobody was chosen, name when it went straight to someone
+    let sentTo = null;
     try {
       const result = await api('addProblem', { email: session.email, ...problemForm });
       if (result.success) {
@@ -498,6 +525,30 @@ function Dashboard({ session, onLogout }) {
     if (name) { await refreshData(); notify("Task moved to " + name); }
   };
 
+  // ── Send a completed task back as not done ──
+  const openSendBack = (task) => {
+    setSendBackReason("");
+    setSendBack(task);
+  };
+
+  const submitSendBack = async () => {
+    if (!sendBack) return;
+    if (!sendBackReason.trim()) { notify("Please write what is still pending", true); return; }
+
+    const taskId = sendBack.id;
+    const who = sendBack.assigneeName || sendBack.assignedTo;
+    setSendBack(null);
+    setSaving(true);
+    let ok = false;
+    try {
+      const result = await api('reopenTask', { email: session.email, taskId, reason: sendBackReason });
+      if (result.success) ok = true; else notify(result.error, true);
+    } catch (err) { notify(err.message || "Failed to send back", true); }
+    setSaving(false);
+
+    if (ok) { await refreshData(); notify("Sent back to " + who); }
+  };
+
   // ── Update Task Status ──
   const updateTaskStatus = async (taskId, newStatus) => {
     setSaving(true);
@@ -527,11 +578,15 @@ function Dashboard({ session, onLogout }) {
   const overdueTasks = pendingTasks.filter(t => t.dueDate && t.dueDate < todayISO());
   // Tasks assigned to ME — the EA has her own tasks too
   const myTasks = tasks.filter(t => sameMail(t.assignedTo, session.email));
-  const myOpenTasks = myTasks.filter(t => t.status !== "Completed");   // shown in My Task
+  const myOpenTasks = myTasks.filter(t => t.status !== "Completed");
   const completedTasks = (isEA ? tasks : myTasks).filter(t => t.status === "Completed");
   const myProblems = problems.filter(p => isEA ? sameMail(p.reportedBy, session.email) : true);
-  // Every task raised from a request — a request can have more than one
   const tasksForProblem = (pid) => tasks.filter(t => t.linkedProblem === pid);
+
+  // Only the person who sent a task (or the EA) can send it back
+  const canSendBack = (t) =>
+    t.status === "Completed" &&
+    (isEA || sameMail(t.reportedBy, session.email) || sameMail(t.assignedBy, session.email));
 
   const navItems = isEA
     ? [{ key: "dashboard", label: "Dashboard", icon: "\u{1F4CA}" },
@@ -558,16 +613,14 @@ function Dashboard({ session, onLogout }) {
     return emp ? emp.name : (email || "Unknown");
   };
 
-  // Everyone in the Employees sheet except yourself
   const suggestableEmployees = employees.filter(e => e.email !== session.email);
 
-  // ── Recent Activity rows (requests + tasks, newest first, with full detail) ──
+  // ── Recent Activity rows ──
   const activity = [
     ...myProblems.map(p => ({ kind: "problem", data: p, date: p.date })),
     ...(isEA ? tasks : myTasks).map(t => ({ kind: "task", data: t, date: t.createdDate }))
   ].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 12);
 
-  // Who does this row belong to?
   const ownerTag = (item) => {
     if (item.kind === "problem") return { text: "My Request", color: "#8B5CF6" };
     return sameMail(item.data.assignedTo, session.email)
@@ -588,8 +641,8 @@ function Dashboard({ session, onLogout }) {
           <Badge text={t.status} color={statusColor(t.status)} />
           {overdue && <Badge text="Overdue" color="#DC2626" />}
         </div>
-        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{t.title}</div>
-        {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{t.description}</div>}
+        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5, wordBreak: "break-word" }}>{t.title}</div>
+        {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55, wordBreak: "break-word" }}>{t.description}</div>}
         <div style={{ display: "flex", gap: 14, fontSize: 12, color: "#9CA3AF", flexWrap: "wrap" }}>
           <span>{"\u{1F464}"} {t.assigneeName || t.assignedTo}</span>
           {t.dueDate && <span style={{ color: overdue ? "#DC2626" : "#B45309", fontWeight: 600 }}>Due: {t.dueDate}</span>}
@@ -598,38 +651,46 @@ function Dashboard({ session, onLogout }) {
           <span>Created: {t.createdDate}</span>
         </div>
 
+        <ReopenInfo t={t} />
         <ResponseInfo t={t} forEA={true} />
 
         {!t.response && t.status === "Pending" && (
           <div style={{ marginTop: 10, fontSize: 12.5, color: "#9CA3AF" }}>{"\u{23F3}"} Waiting for {t.assigneeName || t.assignedTo} to accept</div>
         )}
 
-        {t.status !== "Completed" && (
-          <div className="act-row" style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+        <div className="act-row" style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          {t.status !== "Completed" && (
             <button className="act" style={{ ...btnS, color: "#6D28D9", background: "#F5F3FF", fontSize: 13.5, padding: "11px 16px" }}
               onClick={() => openChange(t)}>
               {"\u{1F464}"} Change person
             </button>
-          </div>
-        )}
+          )}
+          {canSendBack(t) && (
+            <button className="act" style={{ ...btnS, color: "#9A3412", background: "#FFF7ED", fontSize: 13.5, padding: "11px 16px" }}
+              onClick={() => openSendBack(t)}>
+              {"\u21A9"} Not done — send back
+            </button>
+          )}
+        </div>
       </div>
     );
   };
 
-  // ── Task card as the assignee sees it (My Task — everyone, EA included) ──
+  // ── Task card as the assignee sees it (My Task) ──
   const myTaskCard = (t) => {
     const overdue = t.dueDate && t.dueDate < todayISO() && t.status !== "Completed";
     return (
-      <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${overdue ? "#FECACA" : "#E5E7EB"}`, padding: 18 }}>
+      <div key={t.id} className="card" style={{ background: "#fff", borderRadius: 12, border: `1px solid ${t.reopenNote ? "#FED7AA" : overdue ? "#FECACA" : "#E5E7EB"}`, padding: 18 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7, flexWrap: "wrap" }}>
           <OwnerTag text="My Task" color="#2D5BFF" />
           <span style={{ fontFamily: "monospace", fontSize: 12, color: "#9CA3AF" }}>{t.id}</span>
           {t.type && <Badge text={t.type} color={typeColor(t.type)} />}
           <Badge text={t.status} color={statusColor(t.status)} />
+          {t.reopenNote && <Badge text="Sent back" color="#EA580C" />}
           {overdue && <Badge text="Overdue" color="#DC2626" />}
         </div>
-        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{t.title}</div>
-        {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55 }}>{t.description}</div>}
+        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5, wordBreak: "break-word" }}>{t.title}</div>
+        {t.description && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 7, lineHeight: 1.55, wordBreak: "break-word" }}>{t.description}</div>}
         <div style={{ fontSize: 12, color: "#9CA3AF" }}>
           {t.dueDate ? <span style={{ color: overdue ? "#DC2626" : "#B45309", fontWeight: 600 }}>Due: {t.dueDate} · </span> : null}
           Assigned on {t.createdDate}
@@ -637,6 +698,7 @@ function Dashboard({ session, onLogout }) {
           {t.linkedProblem && <span> · Linked: {t.linkedProblem}</span>}
         </div>
 
+        <ReopenInfo t={t} />
         <ResponseInfo t={t} forEA={false} />
 
         <div className="act-row" style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
@@ -693,6 +755,25 @@ function Dashboard({ session, onLogout }) {
               value={respForm.note} onChange={e => setRespForm(f => ({ ...f, note: e.target.value }))} />
           </div>
           <button style={{ ...btnP, width: "100%", background: "#0891B2" }} onClick={submitResponse}>{"\u2713"} Accept & send date</button>
+        </Sheet>
+      )}
+
+      {/* Send back sheet */}
+      {sendBack && (
+        <Sheet title="Send back — not complete" onClose={() => setSendBack(null)}>
+          <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 16, lineHeight: 1.55 }}>
+            <strong style={{ color: "#1A1D23" }}>{sendBack.title}</strong>
+            <div style={{ marginTop: 4 }}>Marked done by {sendBack.assigneeName || sendBack.assignedTo}{sendBack.completedAt ? " on " + sendBack.completedAt : ""}</div>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={lbl}>What is still pending? *</label>
+            <textarea style={{ ...inp, minHeight: 96, resize: "vertical" }} placeholder="e.g., sirf aadha kaam hua hai, baaki files abhi bhi pending hain"
+              value={sendBackReason} onChange={e => setSendBackReason(e.target.value)} />
+          </div>
+          <div style={{ background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 9, padding: "10px 13px", marginBottom: 20, fontSize: 12.5, color: "#9A3412", lineHeight: 1.55 }}>
+            Task वापस उसी व्यक्ति के My Task में <strong>In Progress</strong> बनकर चला जाएगा, और उन्हें mail भी चली जाएगी.
+          </div>
+          <button style={{ ...btnP, width: "100%", background: "#EA580C" }} onClick={submitSendBack}>{"\u21A9"} Send back</button>
         </Sheet>
       )}
 
@@ -826,6 +907,7 @@ function Dashboard({ session, onLogout }) {
                           {isProblem && d.category && <Badge text={d.category} color="#6B7280" />}
                           {d.type && <Badge text={d.type} color={typeColor(d.type)} />}
                           <Badge text={d.status} color={statusColor(d.status)} />
+                          {!isProblem && d.reopenNote && <Badge text="Sent back" color="#EA580C" />}
                         </div>
 
                         <div style={{ fontSize: 14, fontWeight: 700, wordBreak: "break-word" }}>{d.title}</div>
@@ -852,6 +934,12 @@ function Dashboard({ session, onLogout }) {
                           )}
                         </div>
 
+                        {!isProblem && d.reopenNote && (
+                          <div style={{ fontSize: 12, color: "#9A3412", marginTop: 5, lineHeight: 1.7 }}>
+                            {"\u21A9"} Sent back: {d.reopenNote}
+                            {d.reopenedAt && <span style={{ opacity: 0.8 }}> · {d.reopenedAt}</span>}
+                          </div>
+                        )}
                         {!isProblem && d.response && (
                           <div style={{ fontSize: 12, color: "#0E7490", marginTop: 5, lineHeight: 1.7 }}>
                             {"\u2713"} Accepted — will complete by <strong>{d.promisedDate || "\u2014"}</strong>
@@ -863,6 +951,12 @@ function Dashboard({ session, onLogout }) {
                           <div style={{ fontSize: 12, color: "#15803D", fontWeight: 600, marginTop: 4 }}>
                             {"\u2705"} Completed on {d.completedAt}
                           </div>
+                        )}
+                        {!isProblem && canSendBack(d) && (
+                          <button onClick={() => openSendBack(d)}
+                            style={{ marginTop: 8, padding: "8px 13px", borderRadius: 8, border: "1px solid #FED7AA", background: "#FFF7ED", color: "#9A3412", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+                            {"\u21A9"} Not done — send back
+                          </button>
                         )}
                         {isProblem && tasksForProblem(d.id).map(t => (
                           <div key={t.id} style={{ fontSize: 12, color: "#334155", marginTop: 5, lineHeight: 1.7 }}>
@@ -967,7 +1061,7 @@ function Dashboard({ session, onLogout }) {
             <div style={{ animation: "slideIn 0.3s" }}>
               <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700 }}>Task Tracking</h2>
               <p style={{ margin: "0 0 20px", color: "#6B7280", fontSize: 13.5 }}>
-                {isEA ? "Every task in the office — who has it and where it stands" : "What you've sent and where it stands"}
+                {isEA ? "Every task in the office — who has it and where it stands" : "What you've sent · check the work before it counts as done"}
               </p>
 
               {isEA ? (
@@ -999,7 +1093,10 @@ function Dashboard({ session, onLogout }) {
                             )}
                           </div>
 
-                          {tasksForProblem(p.id).map(t => <ReporterTaskInfo key={t.id} t={t} />)}
+                          {tasksForProblem(p.id).map(t => (
+                            <ReporterTaskInfo key={t.id} t={t}
+                              onReopen={canSendBack(t) ? () => openSendBack(t) : null} />
+                          ))}
                         </div>
                       ))}
                     </div>
