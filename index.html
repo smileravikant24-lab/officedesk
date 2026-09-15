@@ -69,6 +69,9 @@ const { useState, useEffect, useCallback, useRef } = React;
 
 // ╔══════════════════════════════════════════════════════════════╗
 // ║  CONFIGURATION                                              ║
+// ║  APPS_SCRIPT_URL must be the /exec link of the ACTIVE       ║
+// ║  deployment (Deploy → Manage deployments). Opening it in a  ║
+// ║  browser should print {"status":"OfficeDesk API is running"}║
 // ╚══════════════════════════════════════════════════════════════╝
 const CONFIG = {
   GOOGLE_CLIENT_ID: '768240328001-153jkt92ph1ai4adgk69hdeg8amchtj5.apps.googleusercontent.com',
@@ -78,6 +81,9 @@ const CONFIG = {
 // ──────────── CONSTANTS ────────────
 const CATEGORIES = ["General Issue", "IT / Computer", "Maintenance", "Follow-up", "Accounts", "Godown", "Other"];
 const TYPES = ["Issue", "Task", "Request", "Complaint"];
+
+// Ready-made task titles for the EA's Assign screen
+const TASK_TITLES = ["Delegation Task", "Follow-up", "Other"];
 
 // A Complaint carries no due date
 const needsDue = (type) => type !== "Complaint";
@@ -106,13 +112,26 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 
 // ──────────── API HELPER ────────────
 async function api(action, data = {}) {
-  const resp = await fetch(CONFIG.APPS_SCRIPT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action, ...data }),
-    redirect: 'follow'
-  });
+  let resp;
+  try {
+    resp = await fetch(CONFIG.APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action, ...data }),
+      redirect: 'follow'
+    });
+  } catch {
+    throw new Error('Could not reach the server — check your internet connection.');
+  }
+
+  if (resp.status === 404) {
+    throw new Error('Server replied 404 — the Apps Script link is no longer live. In Apps Script open Deploy → Manage deployments, copy the /exec URL of the active web app, and put it in APPS_SCRIPT_URL inside index.html.');
+  }
+  if (resp.status === 401 || resp.status === 403) {
+    throw new Error('Server replied ' + resp.status + ' — the web app access is not set to "Anyone". Deploy → Manage deployments → Edit → Who has access: Anyone.');
+  }
   if (!resp.ok) throw new Error('Server replied ' + resp.status);
+
   const text = await resp.text();
   try {
     return JSON.parse(text);
@@ -244,7 +263,7 @@ function ReopenInfo({ t }) {
   );
 }
 
-// ──────────── ACCEPTANCE STRIP (shown on task cards) ────────────
+// ──────────── ACCEPTANCE STRIP ────────────
 function ResponseInfo({ t, forEA }) {
   if (!t.response) return null;
   return (
@@ -346,7 +365,7 @@ function LoginScreen({ onLogin }) {
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, #F3F4F8 0%, #E8ECFF 100%)", padding: 16 }}>
-      <div style={{ background: "#fff", borderRadius: 20, padding: "40px 26px", maxWidth: 420, width: "100%", boxShadow: "0 8px 40px #2D5BFF12", textAlign: "center", border: "1px solid #E5E7EB" }}>
+      <div style={{ background: "#fff", borderRadius: 20, padding: "40px 26px", maxWidth: 440, width: "100%", boxShadow: "0 8px 40px #2D5BFF12", textAlign: "center", border: "1px solid #E5E7EB" }}>
 
         <img src="logo.png" alt="Office Logo" style={{ height: 66, marginBottom: 18, objectFit: "contain" }}
           onError={(e) => { e.target.style.display = 'none'; }} />
@@ -366,7 +385,7 @@ function LoginScreen({ onLogin }) {
         )}
 
         {error && (
-          <div style={{ marginTop: 18, padding: "12px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, color: "#DC2626", fontSize: 13, fontWeight: 500, animation: "fadeIn 0.3s" }}>
+          <div style={{ marginTop: 18, padding: "12px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, color: "#DC2626", fontSize: 12.5, fontWeight: 500, animation: "fadeIn 0.3s", lineHeight: 1.6, textAlign: "left" }}>
             {error}
           </div>
         )}
@@ -393,13 +412,16 @@ function Dashboard({ session, onLogout }) {
   const [saving, setSaving] = useState(false);
   const [notification, setNotification] = useState(null);
   const [problemForm, setProblemForm] = useState({ title: "", category: "General Issue", type: "Issue", description: "", suggestedTo: "", dueDate: "" });
-  const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
-  const [respond, setRespond] = useState(null);       // task being accepted
+  const [taskForm, setTaskForm] = useState({ titlePreset: "Delegation Task", title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
+  const [respond, setRespond] = useState(null);
   const [respForm, setRespForm] = useState({ promisedDate: "", note: "" });
-  const [changing, setChanging] = useState(null);     // task whose person the EA is changing
+  const [changing, setChanging] = useState(null);
   const [newAssignee, setNewAssignee] = useState("");
-  const [sendBack, setSendBack] = useState(null);     // completed task being sent back
+  const [sendBack, setSendBack] = useState(null);
   const [sendBackReason, setSendBackReason] = useState("");
+
+  // Locks the very first tap — React state updates too late to stop a double tap
+  const busyRef = useRef(false);
 
   const user = session.employee;
   const isEA = user.role === 'EA';
@@ -431,12 +453,15 @@ function Dashboard({ session, onLogout }) {
 
   useEffect(() => { refreshData(); }, [refreshData]);
 
-  // ── Submit Request ── (with a person chosen it goes straight to them)
+  // ── Submit Request ──
   const submitProblem = async () => {
+    if (busyRef.current) return;
     if (!problemForm.title.trim()) { notify("Please enter a title", true); return; }
     if (needsDue(problemForm.type) && problemForm.suggestedTo && !problemForm.dueDate) {
       notify("Please give a due date for that person", true); return;
     }
+
+    busyRef.current = true;
     setSaving(true);
     let sentTo = null;
     try {
@@ -447,6 +472,7 @@ function Dashboard({ session, onLogout }) {
       } else { notify(result.error, true); }
     } catch (err) { notify(err.message || "Failed to submit", true); }
     setSaving(false);
+    busyRef.current = false;
 
     if (sentTo !== null) {
       await refreshData();
@@ -457,19 +483,36 @@ function Dashboard({ session, onLogout }) {
 
   // ── Submit Task ──
   const submitTask = async () => {
-    if (!taskForm.title.trim()) { notify("Please enter a task title", true); return; }
+    if (busyRef.current) return;
+
+    const extra = taskForm.title.trim();
+    const preset = taskForm.titlePreset;
+    if (preset === "Other" && !extra) { notify("Please write the task title", true); return; }
+    const finalTitle = preset === "Other" ? extra : (extra ? preset + " — " + extra : preset);
+
     if (!taskForm.assignedTo) { notify("Please select an employee", true); return; }
     if (needsDue(taskForm.type) && !taskForm.dueDate) { notify("Please give a due date", true); return; }
+
+    busyRef.current = true;
     setSaving(true);
     let assignedName = "";
     try {
-      const result = await api('addTask', { email: session.email, ...taskForm });
+      const result = await api('addTask', {
+        email: session.email,
+        title: finalTitle,
+        description: taskForm.description,
+        assignedTo: taskForm.assignedTo,
+        type: taskForm.type,
+        dueDate: taskForm.dueDate,
+        linkedProblem: taskForm.linkedProblem
+      });
       if (result.success) {
         assignedName = result.task?.assigneeName || "employee";
-        setTaskForm({ title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
+        setTaskForm({ titlePreset: "Delegation Task", title: "", description: "", assignedTo: "", type: "Task", dueDate: "", linkedProblem: "" });
       } else { notify(result.error, true); }
     } catch (err) { notify(err.message || "Failed to assign", true); }
     setSaving(false);
+    busyRef.current = false;
 
     if (assignedName) { await refreshData(); notify("Task assigned to " + assignedName + "!"); setView("pending"); }
   };
@@ -481,11 +524,12 @@ function Dashboard({ session, onLogout }) {
   };
 
   const submitResponse = async () => {
-    if (!respond) return;
+    if (!respond || busyRef.current) return;
     if (!respForm.promisedDate) { notify("Please choose the date you'll finish by", true); return; }
 
     const taskId = respond.id;
     setRespond(null);
+    busyRef.current = true;
     setSaving(true);
     let ok = false;
     try {
@@ -496,6 +540,7 @@ function Dashboard({ session, onLogout }) {
       if (result.success) ok = true; else notify(result.error, true);
     } catch (err) { notify(err.message || "Failed to send response", true); }
     setSaving(false);
+    busyRef.current = false;
 
     if (ok) { await refreshData(); notify("Accepted — date sent"); }
   };
@@ -507,12 +552,13 @@ function Dashboard({ session, onLogout }) {
   };
 
   const submitChange = async () => {
-    if (!changing) return;
+    if (!changing || busyRef.current) return;
     if (!newAssignee) { notify("Please select a person", true); return; }
     if (newAssignee === changing.assignedTo) { notify("That's the same person", true); return; }
 
     const taskId = changing.id;
     setChanging(null);
+    busyRef.current = true;
     setSaving(true);
     let name = "";
     try {
@@ -521,6 +567,7 @@ function Dashboard({ session, onLogout }) {
       else notify(result.error, true);
     } catch (err) { notify(err.message || "Failed to change person", true); }
     setSaving(false);
+    busyRef.current = false;
 
     if (name) { await refreshData(); notify("Task moved to " + name); }
   };
@@ -532,12 +579,13 @@ function Dashboard({ session, onLogout }) {
   };
 
   const submitSendBack = async () => {
-    if (!sendBack) return;
+    if (!sendBack || busyRef.current) return;
     if (!sendBackReason.trim()) { notify("Please write what is still pending", true); return; }
 
     const taskId = sendBack.id;
     const who = sendBack.assigneeName || sendBack.assignedTo;
     setSendBack(null);
+    busyRef.current = true;
     setSaving(true);
     let ok = false;
     try {
@@ -545,12 +593,15 @@ function Dashboard({ session, onLogout }) {
       if (result.success) ok = true; else notify(result.error, true);
     } catch (err) { notify(err.message || "Failed to send back", true); }
     setSaving(false);
+    busyRef.current = false;
 
     if (ok) { await refreshData(); notify("Sent back to " + who); }
   };
 
   // ── Update Task Status ──
   const updateTaskStatus = async (taskId, newStatus) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setSaving(true);
     let ok = false;
     try {
@@ -558,6 +609,7 @@ function Dashboard({ session, onLogout }) {
       if (result.success) ok = true; else notify(result.error, true);
     } catch (err) { notify(err.message || "Failed to update", true); }
     setSaving(false);
+    busyRef.current = false;
     if (ok) {
       await refreshData();
       notify(newStatus === "Completed" ? "Done! Moved to your Dashboard" : "Task updated to " + newStatus);
@@ -572,11 +624,9 @@ function Dashboard({ session, onLogout }) {
 
   // Requests nobody was named on — only these ever need the EA
   const unassignedProblems = problems.filter(p => p.status === "Open" && !p.suggestedTo);
-  // Everything still outstanding (EA view of the whole office)
   const pendingTasks = tasks.filter(t => t.status !== "Completed");
   const notAcceptedTasks = pendingTasks.filter(t => !t.response);
   const overdueTasks = pendingTasks.filter(t => t.dueDate && t.dueDate < todayISO());
-  // Tasks assigned to ME — the EA has her own tasks too
   const myTasks = tasks.filter(t => sameMail(t.assignedTo, session.email));
   const myOpenTasks = myTasks.filter(t => t.status !== "Completed");
   const completedTasks = (isEA ? tasks : myTasks).filter(t => t.status === "Completed");
@@ -1136,7 +1186,7 @@ function Dashboard({ session, onLogout }) {
                         <button className="act" style={{ ...btnP, background: "#7C3AED", fontSize: 13.5, padding: "11px 16px", marginTop: 14 }}
                           onClick={() => {
                             setTaskForm(f => ({
-                              ...f, title: p.title, description: p.description,
+                              ...f, titlePreset: "Other", title: p.title, description: p.description,
                               linkedProblem: p.id, type: TYPES.includes(p.type) ? p.type : "Task",
                               assignedTo: "", dueDate: p.dueDate || ""
                             }));
@@ -1204,10 +1254,30 @@ function Dashboard({ session, onLogout }) {
                     {"\u{1F517}"} Linked to request <strong>{taskForm.linkedProblem}</strong> — completing it will auto-resolve the request
                   </div>
                 )}
+
                 <div style={{ marginBottom: 16 }}>
                   <label style={lbl}>Task Title *</label>
-                  <input style={inp} placeholder="e.g., Replace printer toner on 3rd floor" value={taskForm.title} onChange={e => setTaskForm(f => ({ ...f, title: e.target.value }))} />
+                  <select style={inp} value={taskForm.titlePreset}
+                    onChange={e => setTaskForm(f => ({ ...f, titlePreset: e.target.value }))}>
+                    {TASK_TITLES.map(t => <option key={t}>{t}</option>)}
+                  </select>
                 </div>
+
+                <div style={{ marginBottom: 16 }}>
+                  <label style={lbl}>
+                    {taskForm.titlePreset === "Other" ? "Write the title *" : "Add detail to the title (optional)"}
+                  </label>
+                  <input style={inp}
+                    placeholder={taskForm.titlePreset === "Other" ? "e.g., Replace printer toner on 3rd floor" : "e.g., Party master GSTIN update"}
+                    value={taskForm.title}
+                    onChange={e => setTaskForm(f => ({ ...f, title: e.target.value }))} />
+                  <div style={{ fontSize: 11.5, color: "#9CA3AF", marginTop: 5 }}>
+                    Sheet में जाएगा: <strong>{taskForm.titlePreset === "Other"
+                      ? (taskForm.title.trim() || "—")
+                      : (taskForm.title.trim() ? taskForm.titlePreset + " — " + taskForm.title.trim() : taskForm.titlePreset)}</strong>
+                  </div>
+                </div>
+
                 <div style={{ marginBottom: 16 }}>
                   <label style={lbl}>Description</label>
                   <textarea style={{ ...inp, minHeight: 76, resize: "vertical" }} placeholder="Task details and instructions..." value={taskForm.description} onChange={e => setTaskForm(f => ({ ...f, description: e.target.value }))} />
